@@ -2,6 +2,7 @@ import { Plugin } from 'obsidian';
 interface GhostPublisherSettings {
     blogUrl: string;
     writingFolderPath: string;
+    ghostApiKeyName: string;
 }
 export default class ObsidianToGhostPublisher extends Plugin {
     settings: GhostPublisherSettings;

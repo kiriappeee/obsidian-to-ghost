@@ -5,6 +5,7 @@ const obsidian_1 = require("obsidian");
 const DEFAULT_SETTINGS = {
     blogUrl: '',
     writingFolderPath: 'writing',
+    ghostApiKeyName: 'ghost-admin-api-key', // Default for new setting
 };
 class ObsidianToGhostPublisher extends obsidian_1.Plugin {
     settings;
@@ -19,14 +20,26 @@ class ObsidianToGhostPublisher extends obsidian_1.Plugin {
             id: 'publish-to-ghost',
             name: 'Publish to Ghost',
             callback: async () => {
+                const apiKeyName = this.settings.ghostApiKeyName;
+                if (!apiKeyName) {
+                    new obsidian_1.Notice('Ghost Admin API Key Secret Name is not set in plugin settings.');
+                    console.error('Ghost Admin API Key Secret Name is not set.');
+                    return;
+                }
                 try {
-                    const secretKeys = await this.app.secretStorage.listSecrets();
-                    console.log('Available secret keys:', secretKeys);
-                    new obsidian_1.Notice('Secret keys logged to console.');
+                    const apiKey = await this.app.secretStorage.getSecret(apiKeyName);
+                    if (!apiKey) {
+                        new obsidian_1.Notice(`Secret '${apiKeyName}' not found or is empty in secure storage.`);
+                        console.error(`Secret '${apiKeyName}' not found or is empty.`);
+                    }
+                    else {
+                        new obsidian_1.Notice(`Retrieved API Key: ${apiKey}`);
+                        console.log(`Retrieved API Key '${apiKeyName}': ${apiKey}`);
+                    }
                 }
                 catch (e) {
-                    console.error('Error listing secrets:', e);
-                    new obsidian_1.Notice('Error listing secrets. See console for details.');
+                    console.error(`Error requesting secret '${apiKeyName}':`, e);
+                    new obsidian_1.Notice(`Error requesting secret '${apiKeyName}'. See console for details.`);
                 }
             },
         });
@@ -70,6 +83,17 @@ class GhostSettingsTab extends obsidian_1.PluginSettingTab {
             .setValue(this.plugin.settings.writingFolderPath)
             .onChange(async (value) => {
             this.plugin.settings.writingFolderPath = value;
+            await this.plugin.saveSettings();
+        }));
+        // New Setting for Ghost Admin API Key Secret Name
+        new obsidian_1.Setting(containerEl)
+            .setName('Ghost Admin API Key Secret Name')
+            .setDesc('The name of the secret stored in Obsidian\'s secure storage for your Ghost Admin API Key.')
+            .addText(text => text
+            .setPlaceholder(DEFAULT_SETTINGS.ghostApiKeyName)
+            .setValue(this.plugin.settings.ghostApiKeyName)
+            .onChange(async (value) => {
+            this.plugin.settings.ghostApiKeyName = value;
             await this.plugin.saveSettings();
         }));
     }
