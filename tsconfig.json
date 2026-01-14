@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "inlineSources": true,
+    "sourceMap": true,
+    "module": "CommonJS",
+    "target": "ESNext",
+    "lib": ["DOM", "ESNext"],
+    "moduleResolution": "node",
+    "noEmitOnError": true,
+    "importHelpers": true,
+    "isolatedModules": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "declaration": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "downlevelIteration": true
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

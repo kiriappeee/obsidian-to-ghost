@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-to-ghost-publisher",
+  "name": "Obsidian to Ghost Publisher",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Publish markdown files from Obsidian to Ghost CMS.",
+  "author": "Your Name",
+  "authorUrl": "https://yourwebsite.com",
+  "isDesktopOnly": false
+}
