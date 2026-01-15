@@ -58,6 +58,55 @@ export default class ObsidianToGhostPublisher extends Plugin {
     return mimeTypes[extension.toLowerCase()] || 'application/octet-stream';
   }
 
+  private parseFrontmatterString(fmString: string, field: string): string | null {
+    const regex = new RegExp(`^${field}:\\s*(.*)`, 'm');
+    const match = fmString.match(regex);
+    return match ? match[1].replace(/^['"]|['"]$/g, '').trim() : null;
+  }
+
+  private async resolveInternalLinks(markdownContent: string, sourcePath: string): Promise<string> {
+    const linkRegex = /(?<!\!)\[\[([^\]]+)\]\]/g;
+    let processedMarkdown = markdownContent;
+    const matches = Array.from(markdownContent.matchAll(linkRegex));
+
+    if (matches.length > 0) {
+      new Notice(`Found ${matches.length} internal link(s) to resolve...`);
+    }
+
+    for (const match of matches) {
+      const linktext = match[1];
+      const [linkPath, anchor] = linktext.split('#');
+      const linkTargetFile = this.app.metadataCache.getFirstLinkpathDest(linkPath, sourcePath);
+
+      if (!linkTargetFile) {
+        throw new Error(`Could not resolve internal link: [[${linktext}]]`);
+      }
+
+      const targetContent = await this.app.vault.read(linkTargetFile);
+      const targetParts = targetContent.split('---', 3);
+
+      if (targetParts.length < 3) {
+        throw new Error(`Cannot publish: Linked post '${linkPath}' is not published (missing frontmatter).`);
+      }
+
+      const targetFrontmatter = targetParts[1];
+      const publishedUrl = this.parseFrontmatterString(targetFrontmatter, 'publishedUrl');
+
+      if (!publishedUrl) {
+        throw new Error(`Cannot publish: Linked post '${linkPath}' is not published (missing 'publishedUrl').`);
+      }
+
+      let finalUrl = publishedUrl;
+      if (anchor) {
+        finalUrl += `#${slugify(anchor)}`;
+      }
+
+      processedMarkdown = processedMarkdown.replace(match[0], `[${linktext}](${finalUrl})`);
+    }
+
+    return processedMarkdown;
+  }
+
   private async uploadAndReplaceImages(markdownContent: string, token: string, sourcePath: string): Promise<string> {
     const imageRegex = /!\[(?:\[([^\]]*)\])?\(([^)]+)\)|!\[\[([^\]]+)\]\]/g;
     let processedMarkdown = markdownContent;
@@ -157,11 +206,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
           if (parts.length >= 3) {
             frontmatter = parts[1];
             markdownContent = parts.slice(2).join('---').trim();
-
-            const titleMatch = frontmatter.match(/^title:\s*(.*)/m);
-            if (titleMatch && titleMatch[1]) {
-              title = titleMatch[1].replace(/^['"]|['"]$/g, '').trim();
-            }
+            title = this.parseFrontmatterString(frontmatter, 'title') || activeFile.basename;
           } else {
             markdownContent = fileContent.trim();
           }
@@ -186,8 +231,9 @@ export default class ObsidianToGhostPublisher extends Plugin {
             return;
           }
           
-          // --- 4. Process Images ---
-          const processedMarkdown = await this.uploadAndReplaceImages(markdownContent, token, activeFile.path);
+          // --- 4. Process Content (Compiler) ---
+          const markdownWithImages = await this.uploadAndReplaceImages(markdownContent, token, activeFile.path);
+          const finalMarkdown = await this.resolveInternalLinks(markdownWithImages, activeFile.path);
 
           // --- 5. Generate Slug ---
           const slug = slugify(title);
@@ -197,7 +243,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
             version: '0.3.1',
             atoms: [],
             cards: [
-              ['markdown', { cardName: 'markdown', markdown: processedMarkdown }]
+              ['markdown', { cardName: 'markdown', markdown: finalMarkdown }]
             ],
             markups: [],
             sections: [[10, 0]]
@@ -243,7 +289,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
           console.log('Successfully published post:', newPost);
 
           // --- 8. Update Frontmatter in Obsidian ---
-          const currentDate = new Date().toISOString().split('T')[0]; // Format as YYYY-MM-DD
+          const currentDate = new Date().toISOString().split('T')[0];
           let updatedFrontmatter = frontmatter;
 
           const updateFrontmatterField = (fmString: string, field: string, value: string): string => {
