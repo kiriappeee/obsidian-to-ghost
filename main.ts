@@ -1,5 +1,6 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice, request, TFile } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, Notice, requestUrl, RequestUrlParam, TFile } from 'obsidian';
 import { sign } from 'jsonwebtoken';
+import { FormDataEncoder } from 'form-data-encoder';
 
 // Define the settings interface
 interface GhostPublisherSettings {
@@ -46,6 +47,80 @@ function generateGhostAdminToken(apiKey: string): string | null {
 export default class ObsidianToGhostPublisher extends Plugin {
   settings!: GhostPublisherSettings;
 
+  private getMimeType(extension: string): string {
+    const mimeTypes: { [key: string]: string } = {
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+    };
+    return mimeTypes[extension.toLowerCase()] || 'application/octet-stream';
+  }
+
+  private async uploadAndReplaceImages(markdownContent: string, token: string, sourcePath: string): Promise<string> {
+    const imageRegex = /!\[(?:\[([^\]]*)\])?\(([^)]+)\)|!\[\[([^\]]+)\]\]/g;
+    let processedMarkdown = markdownContent;
+    const matches = Array.from(markdownContent.matchAll(imageRegex));
+
+    if (matches.length > 0) {
+      new Notice(`Found ${matches.length} image(s) to upload...`);
+    }
+
+    for (const match of matches) {
+      const isWikiLink = match[3] !== undefined;
+      const localSrc = isWikiLink ? match[3] : match[2];
+      const altText = isWikiLink ? '' : match[1] || '';
+
+      const imageFile = this.app.metadataCache.getFirstLinkpathDest(localSrc, sourcePath);
+      if (!imageFile) {
+        throw new Error(`Image not found in vault: ${localSrc}`);
+      }
+
+      const imageData = await this.app.vault.readBinary(imageFile);
+      const mimeType = this.getMimeType(imageFile.extension);
+      
+      const formData = new FormData();
+      formData.append('file', new Blob([imageData], { type: mimeType }), imageFile.name);
+      formData.append('ref', imageFile.path);
+      formData.append('purpose', 'image');
+
+      const encoder = new FormDataEncoder(formData);
+      
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of encoder) {
+        chunks.push(chunk);
+      }
+      const bodyBuffer = Buffer.concat(chunks);
+      
+      const normalizedUrl = this.settings.blogUrl.replace(/\/$/, '');
+      const uploadUrl = `${normalizedUrl}/ghost/api/admin/images/upload/`;
+
+      const requestParams: RequestUrlParam = {
+        url: uploadUrl,
+        method: 'POST',
+        headers: {
+          'Authorization': `Ghost ${token}`,
+          'Content-Type': encoder.headers['Content-Type'],
+        },
+        body: bodyBuffer.buffer.slice(bodyBuffer.byteOffset, bodyBuffer.byteOffset + bodyBuffer.byteLength),
+        throw: false
+      };
+
+      const response = await requestUrl(requestParams);
+
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Image upload failed for ${localSrc}: Status ${response.status} - ${response.text}`);
+      }
+      
+      const uploadedImageData = response.json;
+      const remoteUrl = uploadedImageData.images[0].url;
+
+      processedMarkdown = processedMarkdown.replace(match[0], `![${altText}](${remoteUrl})`);
+    }
+    return processedMarkdown;
+  }
+
   async onload() {
     console.log('loading Obsidian to Ghost Publisher plugin');
 
@@ -91,10 +166,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
             markdownContent = fileContent.trim();
           }
 
-          // --- 2. Generate Slug ---
-          const slug = slugify(title);
-
-          // --- 3. Get Settings and API Key ---
+          // --- 2. Get Settings and API Key ---
           const { blogUrl, ghostApiKeyName } = this.settings;
           if (!blogUrl || !ghostApiKeyName) {
             new Notice('Blog URL and API Key Name must be set in settings.');
@@ -107,19 +179,25 @@ export default class ObsidianToGhostPublisher extends Plugin {
             return;
           }
 
-          // --- 4. Generate JWT ---
+          // --- 3. Generate JWT ---
           const token = generateGhostAdminToken(apiKey);
           if (!token) {
             new Notice('API Key is not in the correct format (id:secret).');
             return;
           }
+          
+          // --- 4. Process Images ---
+          const processedMarkdown = await this.uploadAndReplaceImages(markdownContent, token, activeFile.path);
 
-          // --- 5. Construct Mobiledoc Payload ---
+          // --- 5. Generate Slug ---
+          const slug = slugify(title);
+          
+          // --- 6. Construct Mobiledoc Payload ---
           const mobiledocPayload = {
             version: '0.3.1',
             atoms: [],
             cards: [
-              ['markdown', { cardName: 'markdown', markdown: markdownContent }]
+              ['markdown', { cardName: 'markdown', markdown: processedMarkdown }]
             ],
             markups: [],
             sections: [[10, 0]]
@@ -129,44 +207,49 @@ export default class ObsidianToGhostPublisher extends Plugin {
             posts: [{
               title: title,
               slug: slug,
-              status: 'published', // As requested: publish directly
+              status: 'published',
               mobiledoc: JSON.stringify(mobiledocPayload)
             }]
           };
 
-          // --- 6. Make API Request (POST) ---
+          // --- 7. Make API Request (POST) ---
           const normalizedUrl = blogUrl.replace(/\/$/, '');
           const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
 
           new Notice(`Attempting to publish "${title}"...`);
           console.log('Sending post payload:', postPayload);
 
-          const response = await request({
+          const postRequestParams: RequestUrlParam = {
             url: apiUrl,
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Ghost ${token}`
             },
-            body: JSON.stringify(postPayload)
-          });
+            body: JSON.stringify(postPayload),
+            throw: false
+          };
+
+          const response = await requestUrl(postRequestParams);
+
+          if (response.status < 200 || response.status >= 300) {
+            throw new Error(`Post creation failed: Status ${response.status} - ${response.text}`);
+          }
           
-          const responseData = JSON.parse(response);
+          const responseData = response.json;
           const newPost = responseData.posts[0];
 
           new Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15000);
           console.log('Successfully published post:', newPost);
 
-          // --- 7. Update Frontmatter in Obsidian ---
+          // --- 8. Update Frontmatter in Obsidian ---
           const currentDate = new Date().toISOString().split('T')[0]; // Format as YYYY-MM-DD
           let updatedFrontmatter = frontmatter;
 
-          // Helper to update or add a frontmatter field
           const updateFrontmatterField = (fmString: string, field: string, value: string): string => {
             const regex = new RegExp(`^${field}:.*`, 'm');
             const newValueLine = `${field}: ${value}`;
             
-            // Handle empty frontmatter block
             const trimmedFm = fmString.trim();
             if (trimmedFm === '') {
               return newValueLine + '\n';
@@ -175,7 +258,6 @@ export default class ObsidianToGhostPublisher extends Plugin {
             if (fmString.match(regex)) {
               return fmString.replace(regex, newValueLine);
             } else {
-              // Add field to the end of the frontmatter string, ensuring it's on a new line
               if (fmString.endsWith('\n')) {
                   return fmString + newValueLine + '\n';
               } else {
@@ -188,10 +270,8 @@ export default class ObsidianToGhostPublisher extends Plugin {
           updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'publishedUrl', newPost.url);
           updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'publishedDate', currentDate);
           
-          // Reconstruct the file content
           let updatedFileContent = `---\n${updatedFrontmatter}---\n${markdownContent}`;
-          if (parts.length < 3) { // Original file had no frontmatter
-            // Create frontmatter from scratch for a file that had none
+          if (parts.length < 3) {
             updatedFileContent = `---\ntitle: ${title}\nghostPostId: ${newPost.id}\npublishedUrl: ${newPost.url}\npublishedDate: ${currentDate}\n---\n${fileContent}`;
           }
 
@@ -199,11 +279,10 @@ export default class ObsidianToGhostPublisher extends Plugin {
           new Notice('Frontmatter updated.', 4000);
           console.log('Frontmatter updated.');
 
-          // --- 8. Move File to Published Folder ---
+          // --- 9. Move File to Published Folder ---
           const writingFolderPath = this.settings.writingFolderPath;
           const publishedFolderPath = `${writingFolderPath}/Published`;
           
-          // Ensure the 'Published' folder exists
           try {
             await this.app.vault.createFolder(publishedFolderPath);
           } catch (e) {
@@ -217,23 +296,25 @@ export default class ObsidianToGhostPublisher extends Plugin {
 
 
         } catch (error) {
-          console.error('Error publishing post:', error);
-          let errorMessage = 'An unknown error occurred.';
-          if (error instanceof Error) {
-            errorMessage = error.message;
-          } else if (typeof error === 'string') {
-            errorMessage = error;
-          } else if (typeof error === 'object' && error !== null && 'message' in error) {
-            errorMessage = (error as any).message;
-          }
-
-          if (errorMessage.includes('Unauthorized')) {
-            new Notice('Authorization failed. Check your API Key and blog URL.', 10000);
-          } else if (errorMessage.includes('Not Found') || errorMessage.includes('404')) {
-            new Notice('API endpoint not found. Check your blog URL.', 10000);
+          console.error('--- DETAILED PUBLISH ERROR ---');
+          console.error('Error Object:', error);
+          
+          let detailedMessage = 'An unknown error occurred.';
+          
+          if (error && typeof error === 'object') {
+            try {
+              console.error('Error stringified:', JSON.stringify(error, null, 2));
+              detailedMessage = (error as any).message || JSON.stringify(error);
+            } catch (e) {
+              console.error('Could not stringify the error object:', e);
+              detailedMessage = 'An un-stringifiable error object was thrown. Check the "Error Object" log above.';
+            }
           } else {
-            new Notice(`Error publishing post: ${errorMessage}`, 10000);
+            detailedMessage = String(error);
           }
+          
+          console.error('--- END DETAILED ERROR ---');
+          new Notice(`Error: ${detailedMessage.substring(0, 150)}. Check developer console for full details.`, 15000);
         }
       },
     });

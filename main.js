@@ -3350,12 +3350,12 @@ var require_lodash = __commonJS({
     }
     var isArray = Array.isArray;
     function isArrayLike(value) {
-      return value != null && isLength(value.length) && !isFunction(value);
+      return value != null && isLength(value.length) && !isFunction2(value);
     }
     function isArrayLikeObject(value) {
       return isObjectLike(value) && isArrayLike(value);
     }
-    function isFunction(value) {
+    function isFunction2(value) {
       var tag = isObject(value) ? objectToString.call(value) : "";
       return tag == funcTag || tag == genTag;
     }
@@ -3543,7 +3543,7 @@ var require_lodash5 = __commonJS({
     function isObjectLike(value) {
       return !!value && typeof value == "object";
     }
-    function isPlainObject(value) {
+    function isPlainObject2(value) {
       if (!isObjectLike(value) || objectToString.call(value) != objectTag || isHostObject(value)) {
         return false;
       }
@@ -3554,7 +3554,7 @@ var require_lodash5 = __commonJS({
       var Ctor = hasOwnProperty.call(proto, "constructor") && proto.constructor;
       return typeof Ctor == "function" && Ctor instanceof Ctor && funcToString.call(Ctor) == objectCtorString;
     }
-    module2.exports = isPlainObject;
+    module2.exports = isPlainObject2;
   }
 });
 
@@ -3667,7 +3667,7 @@ var require_sign = __commonJS({
     var isBoolean = require_lodash2();
     var isInteger = require_lodash3();
     var isNumber = require_lodash4();
-    var isPlainObject = require_lodash5();
+    var isPlainObject2 = require_lodash5();
     var isString = require_lodash6();
     var once = require_lodash7();
     var { KeyObject, createSecretKey, createPrivateKey } = require("crypto");
@@ -3686,7 +3686,7 @@ var require_sign = __commonJS({
         return isString(value) || Array.isArray(value);
       }, message: '"audience" must be a string or array' },
       algorithm: { isValid: includes.bind(null, SUPPORTED_ALGS), message: '"algorithm" must be a valid string enum value' },
-      header: { isValid: isPlainObject, message: '"header" must be an object' },
+      header: { isValid: isPlainObject2, message: '"header" must be an object' },
       encoding: { isValid: isString, message: '"encoding" must be a string' },
       issuer: { isValid: isString, message: '"issuer" must be a string' },
       subject: { isValid: isString, message: '"subject" must be a string' },
@@ -3703,7 +3703,7 @@ var require_sign = __commonJS({
       nbf: { isValid: isNumber, message: '"nbf" should be a number of seconds' }
     };
     function validate(schema, allowUnknown, object, parameterName) {
-      if (!isPlainObject(object)) {
+      if (!isPlainObject2(object)) {
         throw new Error('Expected "' + parameterName + '" to be a plain object.');
       }
       Object.keys(object).forEach(function(key) {
@@ -3903,6 +3903,247 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var import_jsonwebtoken = __toESM(require_jsonwebtoken());
+
+// node_modules/form-data-encoder/lib/util/isFunction.js
+var isFunction = (value) => typeof value === "function";
+
+// node_modules/form-data-encoder/lib/util/isAsyncIterable.js
+var isAsyncIterable = (value) => isFunction(value[Symbol.asyncIterator]);
+
+// node_modules/form-data-encoder/lib/util/chunk.js
+var MAX_CHUNK_SIZE = 65536;
+function* chunk(value) {
+  if (value.byteLength <= MAX_CHUNK_SIZE) {
+    yield value;
+    return;
+  }
+  let offset = 0;
+  while (offset < value.byteLength) {
+    const size = Math.min(value.byteLength - offset, MAX_CHUNK_SIZE);
+    const buffer = value.buffer.slice(offset, offset + size);
+    offset += buffer.byteLength;
+    yield new Uint8Array(buffer);
+  }
+}
+
+// node_modules/form-data-encoder/lib/util/getStreamIterator.js
+async function* readStream(readable) {
+  const reader = readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    yield value;
+  }
+}
+async function* chunkStream(stream) {
+  for await (const value of stream) {
+    yield* chunk(value);
+  }
+}
+var getStreamIterator = (source) => {
+  if (isAsyncIterable(source)) {
+    return chunkStream(source);
+  }
+  if (isFunction(source.getReader)) {
+    return chunkStream(readStream(source));
+  }
+  throw new TypeError("Unsupported data source: Expected either ReadableStream or async iterable.");
+};
+
+// node_modules/form-data-encoder/lib/util/createBoundary.js
+var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+function createBoundary() {
+  let size = 16;
+  let res = "";
+  while (size--) {
+    res += alphabet[Math.random() * alphabet.length << 0];
+  }
+  return res;
+}
+
+// node_modules/form-data-encoder/lib/util/normalizeValue.js
+var normalizeValue = (value) => String(value).replace(/\r|\n/g, (match, i, str) => {
+  if (match === "\r" && str[i + 1] !== "\n" || match === "\n" && str[i - 1] !== "\r") {
+    return "\r\n";
+  }
+  return match;
+});
+
+// node_modules/form-data-encoder/lib/util/isPlainObject.js
+var getType = (value) => Object.prototype.toString.call(value).slice(8, -1).toLowerCase();
+function isPlainObject(value) {
+  if (getType(value) !== "object") {
+    return false;
+  }
+  const pp = Object.getPrototypeOf(value);
+  if (pp === null || pp === void 0) {
+    return true;
+  }
+  const Ctor = pp.constructor && pp.constructor.toString();
+  return Ctor === Object.toString();
+}
+
+// node_modules/form-data-encoder/lib/util/proxyHeaders.js
+function getProperty(target, prop) {
+  if (typeof prop === "string") {
+    for (const [name, value] of Object.entries(target)) {
+      if (prop.toLowerCase() === name.toLowerCase()) {
+        return value;
+      }
+    }
+  }
+  return void 0;
+}
+var proxyHeaders = (object) => new Proxy(object, {
+  get: (target, prop) => getProperty(target, prop),
+  has: (target, prop) => getProperty(target, prop) !== void 0
+});
+
+// node_modules/form-data-encoder/lib/util/isFormData.js
+var isFormData = (value) => Boolean(value && isFunction(value.constructor) && value[Symbol.toStringTag] === "FormData" && isFunction(value.append) && isFunction(value.getAll) && isFunction(value.entries) && isFunction(value[Symbol.iterator]));
+
+// node_modules/form-data-encoder/lib/util/escapeName.js
+var escapeName = (name) => String(name).replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/"/g, "%22");
+
+// node_modules/form-data-encoder/lib/util/isFile.js
+var isFile = (value) => Boolean(value && typeof value === "object" && isFunction(value.constructor) && value[Symbol.toStringTag] === "File" && isFunction(value.stream) && value.name != null);
+
+// node_modules/form-data-encoder/lib/FormDataEncoder.js
+var __classPrivateFieldSet = function(receiver, state, value, kind, f) {
+  if (kind === "m") throw new TypeError("Private method is not writable");
+  if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
+  if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
+  return kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value), value;
+};
+var __classPrivateFieldGet = function(receiver, state, kind, f) {
+  if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
+  if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
+  return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
+};
+var _FormDataEncoder_instances;
+var _FormDataEncoder_CRLF;
+var _FormDataEncoder_CRLF_BYTES;
+var _FormDataEncoder_CRLF_BYTES_LENGTH;
+var _FormDataEncoder_DASHES;
+var _FormDataEncoder_encoder;
+var _FormDataEncoder_footer;
+var _FormDataEncoder_form;
+var _FormDataEncoder_options;
+var _FormDataEncoder_getFieldHeader;
+var _FormDataEncoder_getContentLength;
+var defaultOptions = {
+  enableAdditionalHeaders: false
+};
+var readonlyProp = { writable: false, configurable: false };
+var FormDataEncoder = class {
+  constructor(form, boundaryOrOptions, options) {
+    _FormDataEncoder_instances.add(this);
+    _FormDataEncoder_CRLF.set(this, "\r\n");
+    _FormDataEncoder_CRLF_BYTES.set(this, void 0);
+    _FormDataEncoder_CRLF_BYTES_LENGTH.set(this, void 0);
+    _FormDataEncoder_DASHES.set(this, "-".repeat(2));
+    _FormDataEncoder_encoder.set(this, new TextEncoder());
+    _FormDataEncoder_footer.set(this, void 0);
+    _FormDataEncoder_form.set(this, void 0);
+    _FormDataEncoder_options.set(this, void 0);
+    if (!isFormData(form)) {
+      throw new TypeError("Expected first argument to be a FormData instance.");
+    }
+    let boundary;
+    if (isPlainObject(boundaryOrOptions)) {
+      options = boundaryOrOptions;
+    } else {
+      boundary = boundaryOrOptions;
+    }
+    if (!boundary) {
+      boundary = createBoundary();
+    }
+    if (typeof boundary !== "string") {
+      throw new TypeError("Expected boundary argument to be a string.");
+    }
+    if (options && !isPlainObject(options)) {
+      throw new TypeError("Expected options argument to be an object.");
+    }
+    __classPrivateFieldSet(this, _FormDataEncoder_form, Array.from(form.entries()), "f");
+    __classPrivateFieldSet(this, _FormDataEncoder_options, { ...defaultOptions, ...options }, "f");
+    __classPrivateFieldSet(this, _FormDataEncoder_CRLF_BYTES, __classPrivateFieldGet(this, _FormDataEncoder_encoder, "f").encode(__classPrivateFieldGet(this, _FormDataEncoder_CRLF, "f")), "f");
+    __classPrivateFieldSet(this, _FormDataEncoder_CRLF_BYTES_LENGTH, __classPrivateFieldGet(this, _FormDataEncoder_CRLF_BYTES, "f").byteLength, "f");
+    this.boundary = `form-data-boundary-${boundary}`;
+    this.contentType = `multipart/form-data; boundary=${this.boundary}`;
+    __classPrivateFieldSet(this, _FormDataEncoder_footer, __classPrivateFieldGet(this, _FormDataEncoder_encoder, "f").encode(`${__classPrivateFieldGet(this, _FormDataEncoder_DASHES, "f")}${this.boundary}${__classPrivateFieldGet(this, _FormDataEncoder_DASHES, "f")}${__classPrivateFieldGet(this, _FormDataEncoder_CRLF, "f").repeat(2)}`), "f");
+    const headers = {
+      "Content-Type": this.contentType
+    };
+    const contentLength = __classPrivateFieldGet(this, _FormDataEncoder_instances, "m", _FormDataEncoder_getContentLength).call(this);
+    if (contentLength) {
+      this.contentLength = contentLength;
+      headers["Content-Length"] = contentLength;
+    }
+    this.headers = proxyHeaders(Object.freeze(headers));
+    Object.defineProperties(this, {
+      boundary: readonlyProp,
+      contentType: readonlyProp,
+      contentLength: readonlyProp,
+      headers: readonlyProp
+    });
+  }
+  *values() {
+    for (const [name, raw] of __classPrivateFieldGet(this, _FormDataEncoder_form, "f")) {
+      const value = isFile(raw) ? raw : __classPrivateFieldGet(this, _FormDataEncoder_encoder, "f").encode(normalizeValue(raw));
+      yield __classPrivateFieldGet(this, _FormDataEncoder_instances, "m", _FormDataEncoder_getFieldHeader).call(this, name, value);
+      yield value;
+      yield __classPrivateFieldGet(this, _FormDataEncoder_CRLF_BYTES, "f");
+    }
+    yield __classPrivateFieldGet(this, _FormDataEncoder_footer, "f");
+  }
+  async *encode() {
+    for (const part of this.values()) {
+      if (isFile(part)) {
+        yield* getStreamIterator(part.stream());
+      } else {
+        yield* chunk(part);
+      }
+    }
+  }
+  [(_FormDataEncoder_CRLF = /* @__PURE__ */ new WeakMap(), _FormDataEncoder_CRLF_BYTES = /* @__PURE__ */ new WeakMap(), _FormDataEncoder_CRLF_BYTES_LENGTH = /* @__PURE__ */ new WeakMap(), _FormDataEncoder_DASHES = /* @__PURE__ */ new WeakMap(), _FormDataEncoder_encoder = /* @__PURE__ */ new WeakMap(), _FormDataEncoder_footer = /* @__PURE__ */ new WeakMap(), _FormDataEncoder_form = /* @__PURE__ */ new WeakMap(), _FormDataEncoder_options = /* @__PURE__ */ new WeakMap(), _FormDataEncoder_instances = /* @__PURE__ */ new WeakSet(), _FormDataEncoder_getFieldHeader = function _FormDataEncoder_getFieldHeader2(name, value) {
+    let header = "";
+    header += `${__classPrivateFieldGet(this, _FormDataEncoder_DASHES, "f")}${this.boundary}${__classPrivateFieldGet(this, _FormDataEncoder_CRLF, "f")}`;
+    header += `Content-Disposition: form-data; name="${escapeName(name)}"`;
+    if (isFile(value)) {
+      header += `; filename="${escapeName(value.name)}"${__classPrivateFieldGet(this, _FormDataEncoder_CRLF, "f")}`;
+      header += `Content-Type: ${value.type || "application/octet-stream"}`;
+    }
+    if (__classPrivateFieldGet(this, _FormDataEncoder_options, "f").enableAdditionalHeaders === true) {
+      const size = isFile(value) ? value.size : value.byteLength;
+      if (size != null && !isNaN(size)) {
+        header += `${__classPrivateFieldGet(this, _FormDataEncoder_CRLF, "f")}Content-Length: ${size}`;
+      }
+    }
+    return __classPrivateFieldGet(this, _FormDataEncoder_encoder, "f").encode(`${header}${__classPrivateFieldGet(this, _FormDataEncoder_CRLF, "f").repeat(2)}`);
+  }, _FormDataEncoder_getContentLength = function _FormDataEncoder_getContentLength2() {
+    let length = 0;
+    for (const [name, raw] of __classPrivateFieldGet(this, _FormDataEncoder_form, "f")) {
+      const value = isFile(raw) ? raw : __classPrivateFieldGet(this, _FormDataEncoder_encoder, "f").encode(normalizeValue(raw));
+      const size = isFile(value) ? value.size : value.byteLength;
+      if (size == null || isNaN(size)) {
+        return void 0;
+      }
+      length += __classPrivateFieldGet(this, _FormDataEncoder_instances, "m", _FormDataEncoder_getFieldHeader).call(this, name, value).byteLength;
+      length += size;
+      length += __classPrivateFieldGet(this, _FormDataEncoder_CRLF_BYTES_LENGTH, "f");
+    }
+    return String(length + __classPrivateFieldGet(this, _FormDataEncoder_footer, "f").byteLength);
+  }, Symbol.iterator)]() {
+    return this.values();
+  }
+  [Symbol.asyncIterator]() {
+    return this.encode();
+  }
+};
+
+// main.ts
 var DEFAULT_SETTINGS = {
   blogUrl: "",
   writingFolderPath: "writing",
@@ -3927,6 +4168,65 @@ function generateGhostAdminToken(apiKey) {
 }
 var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
   settings;
+  getMimeType(extension) {
+    const mimeTypes = {
+      "jpg": "image/jpeg",
+      "jpeg": "image/jpeg",
+      "png": "image/png",
+      "gif": "image/gif",
+      "webp": "image/webp"
+    };
+    return mimeTypes[extension.toLowerCase()] || "application/octet-stream";
+  }
+  async uploadAndReplaceImages(markdownContent, token, sourcePath) {
+    const imageRegex = /!\[(?:\[([^\]]*)\])?\(([^)]+)\)|!\[\[([^\]]+)\]\]/g;
+    let processedMarkdown = markdownContent;
+    const matches = Array.from(markdownContent.matchAll(imageRegex));
+    if (matches.length > 0) {
+      new import_obsidian.Notice(`Found ${matches.length} image(s) to upload...`);
+    }
+    for (const match of matches) {
+      const isWikiLink = match[3] !== void 0;
+      const localSrc = isWikiLink ? match[3] : match[2];
+      const altText = isWikiLink ? "" : match[1] || "";
+      const imageFile = this.app.metadataCache.getFirstLinkpathDest(localSrc, sourcePath);
+      if (!imageFile) {
+        throw new Error(`Image not found in vault: ${localSrc}`);
+      }
+      const imageData = await this.app.vault.readBinary(imageFile);
+      const mimeType = this.getMimeType(imageFile.extension);
+      const formData = new FormData();
+      formData.append("file", new Blob([imageData], { type: mimeType }), imageFile.name);
+      formData.append("ref", imageFile.path);
+      formData.append("purpose", "image");
+      const encoder = new FormDataEncoder(formData);
+      const chunks = [];
+      for await (const chunk2 of encoder) {
+        chunks.push(chunk2);
+      }
+      const bodyBuffer = Buffer.concat(chunks);
+      const normalizedUrl = this.settings.blogUrl.replace(/\/$/, "");
+      const uploadUrl = `${normalizedUrl}/ghost/api/admin/images/upload/`;
+      const requestParams = {
+        url: uploadUrl,
+        method: "POST",
+        headers: {
+          "Authorization": `Ghost ${token}`,
+          "Content-Type": encoder.headers["Content-Type"]
+        },
+        body: bodyBuffer.buffer.slice(bodyBuffer.byteOffset, bodyBuffer.byteOffset + bodyBuffer.byteLength),
+        throw: false
+      };
+      const response = await (0, import_obsidian.requestUrl)(requestParams);
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Image upload failed for ${localSrc}: Status ${response.status} - ${response.text}`);
+      }
+      const uploadedImageData = response.json;
+      const remoteUrl = uploadedImageData.images[0].url;
+      processedMarkdown = processedMarkdown.replace(match[0], `![${altText}](${remoteUrl})`);
+    }
+    return processedMarkdown;
+  }
   async onload() {
     console.log("loading Obsidian to Ghost Publisher plugin");
     await this.loadSettings();
@@ -3960,7 +4260,6 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           } else {
             markdownContent = fileContent.trim();
           }
-          const slug = slugify(title);
           const { blogUrl, ghostApiKeyName } = this.settings;
           if (!blogUrl || !ghostApiKeyName) {
             new import_obsidian.Notice("Blog URL and API Key Name must be set in settings.");
@@ -3976,11 +4275,13 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
             new import_obsidian.Notice("API Key is not in the correct format (id:secret).");
             return;
           }
+          const processedMarkdown = await this.uploadAndReplaceImages(markdownContent, token, activeFile.path);
+          const slug = slugify(title);
           const mobiledocPayload = {
             version: "0.3.1",
             atoms: [],
             cards: [
-              ["markdown", { cardName: "markdown", markdown: markdownContent }]
+              ["markdown", { cardName: "markdown", markdown: processedMarkdown }]
             ],
             markups: [],
             sections: [[10, 0]]
@@ -3990,7 +4291,6 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
               title,
               slug,
               status: "published",
-              // As requested: publish directly
               mobiledoc: JSON.stringify(mobiledocPayload)
             }]
           };
@@ -3998,16 +4298,21 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
           new import_obsidian.Notice(`Attempting to publish "${title}"...`);
           console.log("Sending post payload:", postPayload);
-          const response = await (0, import_obsidian.request)({
+          const postRequestParams = {
             url: apiUrl,
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               "Authorization": `Ghost ${token}`
             },
-            body: JSON.stringify(postPayload)
-          });
-          const responseData = JSON.parse(response);
+            body: JSON.stringify(postPayload),
+            throw: false
+          };
+          const response = await (0, import_obsidian.requestUrl)(postRequestParams);
+          if (response.status < 200 || response.status >= 300) {
+            throw new Error(`Post creation failed: Status ${response.status} - ${response.text}`);
+          }
+          const responseData = response.json;
           const newPost = responseData.posts[0];
           new import_obsidian.Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15e3);
           console.log("Successfully published post:", newPost);
@@ -4059,22 +4364,22 @@ ${fileContent}`;
           new import_obsidian.Notice(`File moved to "${publishedFolderPath}"`, 5e3);
           console.log(`File moved to ${newFilePath}`);
         } catch (error) {
-          console.error("Error publishing post:", error);
-          let errorMessage = "An unknown error occurred.";
-          if (error instanceof Error) {
-            errorMessage = error.message;
-          } else if (typeof error === "string") {
-            errorMessage = error;
-          } else if (typeof error === "object" && error !== null && "message" in error) {
-            errorMessage = error.message;
-          }
-          if (errorMessage.includes("Unauthorized")) {
-            new import_obsidian.Notice("Authorization failed. Check your API Key and blog URL.", 1e4);
-          } else if (errorMessage.includes("Not Found") || errorMessage.includes("404")) {
-            new import_obsidian.Notice("API endpoint not found. Check your blog URL.", 1e4);
+          console.error("--- DETAILED PUBLISH ERROR ---");
+          console.error("Error Object:", error);
+          let detailedMessage = "An unknown error occurred.";
+          if (error && typeof error === "object") {
+            try {
+              console.error("Error stringified:", JSON.stringify(error, null, 2));
+              detailedMessage = error.message || JSON.stringify(error);
+            } catch (e) {
+              console.error("Could not stringify the error object:", e);
+              detailedMessage = 'An un-stringifiable error object was thrown. Check the "Error Object" log above.';
+            }
           } else {
-            new import_obsidian.Notice(`Error publishing post: ${errorMessage}`, 1e4);
+            detailedMessage = String(error);
           }
+          console.error("--- END DETAILED ERROR ---");
+          new import_obsidian.Notice(`Error: ${detailedMessage.substring(0, 150)}. Check developer console for full details.`, 15e3);
         }
       }
     });
