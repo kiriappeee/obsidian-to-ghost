@@ -4184,18 +4184,20 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
     return match ? match[1].replace(/^['"]|['"]$/g, "").trim() : null;
   }
   async resolveInternalLinks(markdownContent, sourcePath) {
-    const linkRegex = /(?<!\!)\[\[([^\]]+)\]\]/g;
+    const linkRegex = /(?<!\!)\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g;
     let processedMarkdown = markdownContent;
     const matches = Array.from(markdownContent.matchAll(linkRegex));
     if (matches.length > 0) {
       new import_obsidian.Notice(`Found ${matches.length} internal link(s) to resolve...`);
     }
     for (const match of matches) {
-      const linktext = match[1];
-      const [linkPath, anchor] = linktext.split("#");
+      const fullLinkMatch = match[0];
+      const linkTargetWithAnchor = match[1];
+      const customDisplayText = match[2];
+      const [linkPath, anchor] = linkTargetWithAnchor.split("#");
       const linkTargetFile = this.app.metadataCache.getFirstLinkpathDest(linkPath, sourcePath);
       if (!linkTargetFile) {
-        throw new Error(`Could not resolve internal link: [[${linktext}]]`);
+        throw new Error(`Could not resolve internal link: [[${linkTargetWithAnchor}]]`);
       }
       const targetContent = await this.app.vault.read(linkTargetFile);
       const targetParts = targetContent.split("---", 3);
@@ -4211,7 +4213,8 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
       if (anchor) {
         finalUrl += `#${slugify(anchor)}`;
       }
-      processedMarkdown = processedMarkdown.replace(match[0], `[${linktext}](${finalUrl})`);
+      const linkText = customDisplayText || linkPath;
+      processedMarkdown = processedMarkdown.replace(fullLinkMatch, `[${linkText}](${finalUrl})`);
     }
     return processedMarkdown;
   }

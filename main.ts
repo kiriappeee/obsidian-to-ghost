@@ -65,7 +65,9 @@ export default class ObsidianToGhostPublisher extends Plugin {
   }
 
   private async resolveInternalLinks(markdownContent: string, sourcePath: string): Promise<string> {
-    const linkRegex = /(?<!\!)\[\[([^\]]+)\]\]/g;
+    // Regex to find WikiLinks that are NOT image links (negative lookbehind for '!')
+    // Captures: 1=linkTarget (e.g., "My Note#Heading"), 2=displayText (if '|' present)
+    const linkRegex = /(?<!\!)\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g;
     let processedMarkdown = markdownContent;
     const matches = Array.from(markdownContent.matchAll(linkRegex));
 
@@ -74,12 +76,15 @@ export default class ObsidianToGhostPublisher extends Plugin {
     }
 
     for (const match of matches) {
-      const linktext = match[1];
-      const [linkPath, anchor] = linktext.split('#');
+      const fullLinkMatch = match[0]; // e.g., "[[My Note#Heading|Display Text]]"
+      const linkTargetWithAnchor = match[1]; // e.g., "My Note#Heading"
+      const customDisplayText = match[2]; // e.g., "Display Text"
+
+      const [linkPath, anchor] = linkTargetWithAnchor.split('#'); // linkPath: "My Note", anchor: "Heading"
       const linkTargetFile = this.app.metadataCache.getFirstLinkpathDest(linkPath, sourcePath);
 
       if (!linkTargetFile) {
-        throw new Error(`Could not resolve internal link: [[${linktext}]]`);
+        throw new Error(`Could not resolve internal link: [[${linkTargetWithAnchor}]]`);
       }
 
       const targetContent = await this.app.vault.read(linkTargetFile);
@@ -101,7 +106,9 @@ export default class ObsidianToGhostPublisher extends Plugin {
         finalUrl += `#${slugify(anchor)}`;
       }
 
-      processedMarkdown = processedMarkdown.replace(match[0], `[${linktext}](${finalUrl})`);
+      const linkText = customDisplayText || linkPath; // Use custom text or just the linkPath (file name)
+
+      processedMarkdown = processedMarkdown.replace(fullLinkMatch, `[${linkText}](${finalUrl})`);
     }
 
     return processedMarkdown;
