@@ -20,26 +20,26 @@ class ObsidianToGhostPublisher extends obsidian_1.Plugin {
             id: 'publish-to-ghost',
             name: 'Publish to Ghost',
             callback: async () => {
-                const apiKeyName = this.settings.ghostApiKeyName;
-                if (!apiKeyName) {
-                    new obsidian_1.Notice('Ghost Admin API Key Secret Name is not set in plugin settings.');
-                    console.error('Ghost Admin API Key Secret Name is not set.');
+                const blogUrl = this.settings.blogUrl;
+                if (!blogUrl) {
+                    new obsidian_1.Notice('Blog URL is not set in plugin settings.');
                     return;
                 }
+                // Handle trailing slash and construct URL
+                const normalizedUrl = blogUrl.replace(/\/$/, '');
+                const apiUrl = `${normalizedUrl}/ghost/api/admin/site/`;
                 try {
-                    const apiKey = await this.app.secretStorage.getSecret(apiKeyName);
-                    if (!apiKey) {
-                        new obsidian_1.Notice(`Secret '${apiKeyName}' not found or is empty in secure storage.`);
-                        console.error(`Secret '${apiKeyName}' not found or is empty.`);
-                    }
-                    else {
-                        new obsidian_1.Notice(`Retrieved API Key: ${apiKey}`);
-                        console.log(`Retrieved API Key '${apiKeyName}': ${apiKey}`);
-                    }
+                    new obsidian_1.Notice(`Fetching from ${apiUrl}...`);
+                    const response = await (0, obsidian_1.request)({ url: apiUrl });
+                    const siteData = JSON.parse(response);
+                    // Display a summary of the site data
+                    const noticeMessage = `Site Title: ${siteData.site.title}\nSite URL: ${siteData.site.url}`;
+                    new obsidian_1.Notice(noticeMessage, 10000); // Show for 10 seconds
+                    console.log('Ghost Site Data:', siteData);
                 }
-                catch (e) {
-                    console.error(`Error requesting secret '${apiKeyName}':`, e);
-                    new obsidian_1.Notice(`Error requesting secret '${apiKeyName}'. See console for details.`);
+                catch (error) {
+                    console.error('Error fetching Ghost site data:', error);
+                    new obsidian_1.Notice('Error fetching Ghost site data. Is the Blog URL correct and is Ghost running?', 10000);
                 }
             },
         });

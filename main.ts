@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, Notice, request } from 'obsidian';
 
 // Define the settings interface
 interface GhostPublisherSettings {
@@ -31,26 +31,29 @@ export default class ObsidianToGhostPublisher extends Plugin {
       id: 'publish-to-ghost',
       name: 'Publish to Ghost',
       callback: async () => {
-        const apiKeyName = this.settings.ghostApiKeyName;
-        if (!apiKeyName) {
-          new Notice('Ghost Admin API Key Secret Name is not set in plugin settings.');
-          console.error('Ghost Admin API Key Secret Name is not set.');
+        const blogUrl = this.settings.blogUrl;
+        if (!blogUrl) {
+          new Notice('Blog URL is not set in plugin settings.');
           return;
         }
 
-        try {
-          const apiKey = await this.app.secretStorage.getSecret(apiKeyName);
+        // Handle trailing slash and construct URL
+        const normalizedUrl = blogUrl.replace(/\/$/, '');
+        const apiUrl = `${normalizedUrl}/ghost/api/admin/site/`;
 
-          if (!apiKey) {
-            new Notice(`Secret '${apiKeyName}' not found or is empty in secure storage.`);
-            console.error(`Secret '${apiKeyName}' not found or is empty.`);
-          } else {
-            new Notice(`Retrieved API Key: ${apiKey}`);
-            console.log(`Retrieved API Key '${apiKeyName}': ${apiKey}`);
-          }
-        } catch (e) {
-          console.error(`Error requesting secret '${apiKeyName}':`, e);
-          new Notice(`Error requesting secret '${apiKeyName}'. See console for details.`);
+        try {
+          new Notice(`Fetching from ${apiUrl}...`);
+          const response = await request({ url: apiUrl });
+          const siteData = JSON.parse(response);
+
+          // Display a summary of the site data
+          const noticeMessage = `Site Title: ${siteData.site.title}\nSite URL: ${siteData.site.url}`;
+          new Notice(noticeMessage, 10000); // Show for 10 seconds
+          console.log('Ghost Site Data:', siteData);
+
+        } catch (error) {
+          console.error('Error fetching Ghost site data:', error);
+          new Notice('Error fetching Ghost site data. Is the Blog URL correct and is Ghost running?', 10000);
         }
       },
     });
