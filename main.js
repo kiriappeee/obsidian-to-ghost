@@ -4011,6 +4011,40 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           const newPost = responseData.posts[0];
           new import_obsidian.Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15e3);
           console.log("Successfully published post:", newPost);
+          const currentDateTime = (/* @__PURE__ */ new Date()).toISOString();
+          let updatedFrontmatter = frontmatter;
+          const updateFrontmatterField = (fmString, field, value) => {
+            const regex = new RegExp(`^${field}:.*`, "m");
+            const newValue = `${field}: ${value}`;
+            if (fmString.match(regex)) {
+              return fmString.replace(regex, newValue);
+            } else {
+              const lines = fmString.split("\n");
+              const lastLineIndex = lines.findIndex((line) => line.trim() === "---");
+              if (lastLineIndex !== -1 && lines[lastLineIndex] === "---") {
+                lines.splice(lastLineIndex, 0, newValue);
+              } else {
+                lines.push(newValue);
+              }
+              return lines.join("\n");
+            }
+          };
+          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "ghostPostId", newPost.id);
+          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "publishedUrl", newPost.url);
+          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "publishedDate", currentDateTime);
+          let updatedFileContent = `---
+${updatedFrontmatter}
+---
+${markdownContent}`;
+          if (parts.length < 3) {
+            updatedFileContent = `---
+${updatedFrontmatter}
+---
+${fileContent}`;
+          }
+          await this.app.vault.modify(activeFile, updatedFileContent);
+          new import_obsidian.Notice("Frontmatter updated successfully!", 5e3);
+          console.log("Frontmatter updated:", updatedFileContent);
         } catch (error) {
           console.error("Error publishing post:", error);
           let errorMessage = "An unknown error occurred.";

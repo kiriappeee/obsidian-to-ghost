@@ -157,6 +157,43 @@ export default class ObsidianToGhostPublisher extends Plugin {
           new Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15000);
           console.log('Successfully published post:', newPost);
 
+          // --- 7. Update Frontmatter in Obsidian ---
+          const currentDateTime = new Date().toISOString();
+          let updatedFrontmatter = frontmatter;
+
+          // Helper to update or add a frontmatter field
+          const updateFrontmatterField = (fmString: string, field: string, value: string): string => {
+            const regex = new RegExp(`^${field}:.*`, 'm');
+            const newValue = `${field}: ${value}`;
+            if (fmString.match(regex)) {
+              return fmString.replace(regex, newValue);
+            } else {
+              // Add new field before the closing '---' or at the end if no other fields
+              const lines = fmString.split('\n');
+              const lastLineIndex = lines.findIndex(line => line.trim() === '---') // Find last '---'
+              if (lastLineIndex !== -1 && lines[lastLineIndex] === '---') {
+                lines.splice(lastLineIndex, 0, newValue); // Insert before last '---'
+              } else {
+                lines.push(newValue); // Add to end
+              }
+              return lines.join('\n');
+            }
+          };
+          
+          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'ghostPostId', newPost.id);
+          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'publishedUrl', newPost.url);
+          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'publishedDate', currentDateTime);
+          
+          // Reconstruct the file content
+          let updatedFileContent = `---\n${updatedFrontmatter}\n---\n${markdownContent}`;
+          if (parts.length < 3) { // Original file had no frontmatter, add it now
+             updatedFileContent = `---\n${updatedFrontmatter}\n---\n${fileContent}`; // Use original fileContent as markdown
+          }
+
+          await this.app.vault.modify(activeFile, updatedFileContent);
+          new Notice('Frontmatter updated successfully!', 5000);
+          console.log('Frontmatter updated:', updatedFileContent);
+
         } catch (error) {
           console.error('Error publishing post:', error);
           let errorMessage = 'An unknown error occurred.';
