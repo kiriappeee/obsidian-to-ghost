@@ -3909,6 +3909,9 @@ var DEFAULT_SETTINGS = {
   ghostApiKeyName: "ghost-admin-api-key"
   // Default for new setting
 };
+function slugify(text) {
+  return text.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/\s+/g, "-").replace(/[^\w\-]+/g, "").replace(/\-\-+/g, "-");
+}
 function generateGhostAdminToken(apiKey) {
   const [id, secret] = apiKey.split(":");
   if (!id || !secret) {
@@ -3932,12 +3935,37 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
       id: "publish-to-ghost",
       name: "Publish to Ghost",
       callback: async () => {
-        const { blogUrl, ghostApiKeyName } = this.settings;
-        if (!blogUrl || !ghostApiKeyName) {
-          new import_obsidian.Notice("Blog URL and API Key Name must be set in settings.");
+        const activeFile = this.app.workspace.getActiveFile();
+        if (!activeFile) {
+          new import_obsidian.Notice("No active file to publish.");
+          return;
+        }
+        if (activeFile.extension !== "md") {
+          new import_obsidian.Notice("Can only publish Markdown files.");
           return;
         }
         try {
+          const fileContent = await this.app.vault.read(activeFile);
+          const parts = fileContent.split("---", 3);
+          let frontmatter = "";
+          let markdownContent = fileContent;
+          let title = activeFile.basename;
+          if (parts.length >= 3) {
+            frontmatter = parts[1];
+            markdownContent = parts.slice(2).join("---").trim();
+            const titleMatch = frontmatter.match(/^title:\s*(.*)/m);
+            if (titleMatch && titleMatch[1]) {
+              title = titleMatch[1].replace(/^['"]|['"]$/g, "").trim();
+            }
+          } else {
+            markdownContent = fileContent.trim();
+          }
+          const slug = slugify(title);
+          const { blogUrl, ghostApiKeyName } = this.settings;
+          if (!blogUrl || !ghostApiKeyName) {
+            new import_obsidian.Notice("Blog URL and API Key Name must be set in settings.");
+            return;
+          }
           const apiKey = await this.app.secretStorage.getSecret(ghostApiKeyName);
           if (!apiKey) {
             new import_obsidian.Notice(`API Key secret named '${ghostApiKeyName}' not found.`);
@@ -3948,22 +3976,58 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
             new import_obsidian.Notice("API Key is not in the correct format (id:secret).");
             return;
           }
+          const mobiledocPayload = {
+            version: "0.3.1",
+            atoms: [],
+            cards: [
+              ["markdown", { cardName: "markdown", markdown: markdownContent }]
+            ],
+            markups: [],
+            sections: [[10, 0]]
+          };
+          const postPayload = {
+            posts: [{
+              title,
+              slug,
+              status: "published",
+              // As requested: publish directly
+              mobiledoc: JSON.stringify(mobiledocPayload)
+            }]
+          };
           const normalizedUrl = blogUrl.replace(/\/$/, "");
           const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
-          new import_obsidian.Notice("Attempting to authenticate with Ghost...");
+          new import_obsidian.Notice(`Attempting to publish "${title}"...`);
+          console.log("Sending post payload:", postPayload);
           const response = await (0, import_obsidian.request)({
             url: apiUrl,
-            method: "GET",
+            method: "POST",
             headers: {
+              "Content-Type": "application/json",
               "Authorization": `Ghost ${token}`
-            }
+            },
+            body: JSON.stringify(postPayload)
           });
           const responseData = JSON.parse(response);
-          new import_obsidian.Notice(`Successfully authenticated! Found ${responseData.posts.length} posts.`, 1e4);
-          console.log("Ghost Posts:", responseData);
+          const newPost = responseData.posts[0];
+          new import_obsidian.Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15e3);
+          console.log("Successfully published post:", newPost);
         } catch (error) {
-          console.error("Error authenticating with Ghost:", error);
-          new import_obsidian.Notice("Error authenticating with Ghost. Check settings and API key.", 1e4);
+          console.error("Error publishing post:", error);
+          let errorMessage = "An unknown error occurred.";
+          if (error instanceof Error) {
+            errorMessage = error.message;
+          } else if (typeof error === "string") {
+            errorMessage = error;
+          } else if (typeof error === "object" && error !== null && "message" in error) {
+            errorMessage = error.message;
+          }
+          if (errorMessage.includes("Unauthorized")) {
+            new import_obsidian.Notice("Authorization failed. Check your API Key and blog URL.", 1e4);
+          } else if (errorMessage.includes("Not Found") || errorMessage.includes("404")) {
+            new import_obsidian.Notice("API endpoint not found. Check your blog URL.", 1e4);
+          } else {
+            new import_obsidian.Notice(`Error publishing post: ${errorMessage}`, 1e4);
+          }
         }
       }
     });

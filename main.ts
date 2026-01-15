@@ -15,7 +15,20 @@ const DEFAULT_SETTINGS: GhostPublisherSettings = {
   ghostApiKeyName: 'ghost-admin-api-key', // Default for new setting
 };
 
-// ADDED: JWT generation function
+// Helper: slugify function
+function slugify(text: string): string {
+  return text
+    .toString()
+    .normalize('NFD') // split an accented letter in the base letter and the acent
+    .replace(/[\u0300-\u036f]/g, '') // remove all previously split accents
+    .toLowerCase()
+    .trim() // Remove whitespace from both sides of a string
+    .replace(/\s+/g, '-') // Replace spaces with -
+    .replace(/[^\w\-]+/g, '') // Remove all non-word chars
+    .replace(/\-\-+/g, '-'); // Replace multiple - with single -
+}
+
+// Helper: JWT generation function
 function generateGhostAdminToken(apiKey: string): string | null {
   const [id, secret] = apiKey.split(':');
   if (!id || !secret) {
@@ -47,50 +60,121 @@ export default class ObsidianToGhostPublisher extends Plugin {
       id: 'publish-to-ghost',
       name: 'Publish to Ghost',
       callback: async () => {
-        // 1. Get Settings
-        const { blogUrl, ghostApiKeyName } = this.settings;
-        if (!blogUrl || !ghostApiKeyName) {
-          new Notice('Blog URL and API Key Name must be set in settings.');
+        // --- 1. Get active file and extract content ---
+        const activeFile = this.app.workspace.getActiveFile();
+        if (!activeFile) {
+          new Notice('No active file to publish.');
+          return;
+        }
+        if (activeFile.extension !== 'md') {
+          new Notice('Can only publish Markdown files.');
           return;
         }
 
         try {
-          // 2. Get API Key
+          const fileContent = await this.app.vault.read(activeFile);
+          const parts = fileContent.split('---', 3);
+
+          let frontmatter = '';
+          let markdownContent = fileContent;
+          let title = activeFile.basename;
+
+          if (parts.length >= 3) {
+            frontmatter = parts[1];
+            markdownContent = parts.slice(2).join('---').trim();
+
+            const titleMatch = frontmatter.match(/^title:\s*(.*)/m);
+            if (titleMatch && titleMatch[1]) {
+              title = titleMatch[1].replace(/^['"]|['"]$/g, '').trim();
+            }
+          } else {
+            markdownContent = fileContent.trim();
+          }
+
+          // --- 2. Generate Slug ---
+          const slug = slugify(title);
+
+          // --- 3. Get Settings and API Key ---
+          const { blogUrl, ghostApiKeyName } = this.settings;
+          if (!blogUrl || !ghostApiKeyName) {
+            new Notice('Blog URL and API Key Name must be set in settings.');
+            return;
+          }
+
           const apiKey = await this.app.secretStorage.getSecret(ghostApiKeyName);
           if (!apiKey) {
             new Notice(`API Key secret named '${ghostApiKeyName}' not found.`);
             return;
           }
 
-          // 3. Generate JWT
+          // --- 4. Generate JWT ---
           const token = generateGhostAdminToken(apiKey);
           if (!token) {
             new Notice('API Key is not in the correct format (id:secret).');
             return;
           }
 
-          // 4. Make API Request
+          // --- 5. Construct Mobiledoc Payload ---
+          const mobiledocPayload = {
+            version: '0.3.1',
+            atoms: [],
+            cards: [
+              ['markdown', { cardName: 'markdown', markdown: markdownContent }]
+            ],
+            markups: [],
+            sections: [[10, 0]]
+          };
+
+          const postPayload = {
+            posts: [{
+              title: title,
+              slug: slug,
+              status: 'published', // As requested: publish directly
+              mobiledoc: JSON.stringify(mobiledocPayload)
+            }]
+          };
+
+          // --- 6. Make API Request (POST) ---
           const normalizedUrl = blogUrl.replace(/\/$/, '');
           const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
 
-          new Notice('Attempting to authenticate with Ghost...');
-          
+          new Notice(`Attempting to publish "${title}"...`);
+          console.log('Sending post payload:', postPayload);
+
           const response = await request({
             url: apiUrl,
-            method: 'GET',
+            method: 'POST',
             headers: {
+              'Content-Type': 'application/json',
               'Authorization': `Ghost ${token}`
-            }
+            },
+            body: JSON.stringify(postPayload)
           });
           
           const responseData = JSON.parse(response);
-          
-          new Notice(`Successfully authenticated! Found ${responseData.posts.length} posts.`, 10000);
-          console.log('Ghost Posts:', responseData);
+          const newPost = responseData.posts[0];
+
+          new Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15000);
+          console.log('Successfully published post:', newPost);
 
         } catch (error) {
-          console.error('Error authenticating with Ghost:', error);
-          new Notice('Error authenticating with Ghost. Check settings and API key.', 10000);
+          console.error('Error publishing post:', error);
+          let errorMessage = 'An unknown error occurred.';
+          if (error instanceof Error) {
+            errorMessage = error.message;
+          } else if (typeof error === 'string') {
+            errorMessage = error;
+          } else if (typeof error === 'object' && error !== null && 'message' in error) {
+            errorMessage = (error as any).message;
+          }
+
+          if (errorMessage.includes('Unauthorized')) {
+            new Notice('Authorization failed. Check your API Key and blog URL.', 10000);
+          } else if (errorMessage.includes('Not Found') || errorMessage.includes('404')) {
+            new Notice('API endpoint not found. Check your blog URL.', 10000);
+          } else {
+            new Notice(`Error publishing post: ${errorMessage}`, 10000);
+          }
         }
       },
     });
