@@ -4011,40 +4011,53 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           const newPost = responseData.posts[0];
           new import_obsidian.Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15e3);
           console.log("Successfully published post:", newPost);
-          const currentDateTime = (/* @__PURE__ */ new Date()).toISOString();
+          const currentDate = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
           let updatedFrontmatter = frontmatter;
           const updateFrontmatterField = (fmString, field, value) => {
             const regex = new RegExp(`^${field}:.*`, "m");
-            const newValue = `${field}: ${value}`;
+            const newValueLine = `${field}: ${value}`;
+            const trimmedFm = fmString.trim();
+            if (trimmedFm === "") {
+              return newValueLine + "\n";
+            }
             if (fmString.match(regex)) {
-              return fmString.replace(regex, newValue);
+              return fmString.replace(regex, newValueLine);
             } else {
-              const lines = fmString.split("\n");
-              const lastLineIndex = lines.findIndex((line) => line.trim() === "---");
-              if (lastLineIndex !== -1 && lines[lastLineIndex] === "---") {
-                lines.splice(lastLineIndex, 0, newValue);
+              if (fmString.endsWith("\n")) {
+                return fmString + newValueLine + "\n";
               } else {
-                lines.push(newValue);
+                return fmString + "\n" + newValueLine + "\n";
               }
-              return lines.join("\n");
             }
           };
           updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "ghostPostId", newPost.id);
           updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "publishedUrl", newPost.url);
-          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "publishedDate", currentDateTime);
+          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "publishedDate", currentDate);
           let updatedFileContent = `---
-${updatedFrontmatter}
----
+${updatedFrontmatter}---
 ${markdownContent}`;
           if (parts.length < 3) {
             updatedFileContent = `---
-${updatedFrontmatter}
+title: ${title}
+ghostPostId: ${newPost.id}
+publishedUrl: ${newPost.url}
+publishedDate: ${currentDate}
 ---
 ${fileContent}`;
           }
           await this.app.vault.modify(activeFile, updatedFileContent);
-          new import_obsidian.Notice("Frontmatter updated successfully!", 5e3);
-          console.log("Frontmatter updated:", updatedFileContent);
+          new import_obsidian.Notice("Frontmatter updated.", 4e3);
+          console.log("Frontmatter updated.");
+          const writingFolderPath = this.settings.writingFolderPath;
+          const publishedFolderPath = `${writingFolderPath}/Published`;
+          try {
+            await this.app.vault.createFolder(publishedFolderPath);
+          } catch (e) {
+          }
+          const newFilePath = `${publishedFolderPath}/${activeFile.name}`;
+          await this.app.vault.rename(activeFile, newFilePath);
+          new import_obsidian.Notice(`File moved to "${publishedFolderPath}"`, 5e3);
+          console.log(`File moved to ${newFilePath}`);
         } catch (error) {
           console.error("Error publishing post:", error);
           let errorMessage = "An unknown error occurred.";

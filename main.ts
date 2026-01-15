@@ -158,41 +158,63 @@ export default class ObsidianToGhostPublisher extends Plugin {
           console.log('Successfully published post:', newPost);
 
           // --- 7. Update Frontmatter in Obsidian ---
-          const currentDateTime = new Date().toISOString();
+          const currentDate = new Date().toISOString().split('T')[0]; // Format as YYYY-MM-DD
           let updatedFrontmatter = frontmatter;
 
           // Helper to update or add a frontmatter field
           const updateFrontmatterField = (fmString: string, field: string, value: string): string => {
             const regex = new RegExp(`^${field}:.*`, 'm');
-            const newValue = `${field}: ${value}`;
+            const newValueLine = `${field}: ${value}`;
+            
+            // Handle empty frontmatter block
+            const trimmedFm = fmString.trim();
+            if (trimmedFm === '') {
+              return newValueLine + '\n';
+            }
+
             if (fmString.match(regex)) {
-              return fmString.replace(regex, newValue);
+              return fmString.replace(regex, newValueLine);
             } else {
-              // Add new field before the closing '---' or at the end if no other fields
-              const lines = fmString.split('\n');
-              const lastLineIndex = lines.findIndex(line => line.trim() === '---') // Find last '---'
-              if (lastLineIndex !== -1 && lines[lastLineIndex] === '---') {
-                lines.splice(lastLineIndex, 0, newValue); // Insert before last '---'
+              // Add field to the end of the frontmatter string, ensuring it's on a new line
+              if (fmString.endsWith('\n')) {
+                  return fmString + newValueLine + '\n';
               } else {
-                lines.push(newValue); // Add to end
+                  return fmString + '\n' + newValueLine + '\n';
               }
-              return lines.join('\n');
             }
           };
           
           updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'ghostPostId', newPost.id);
           updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'publishedUrl', newPost.url);
-          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'publishedDate', currentDateTime);
+          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'publishedDate', currentDate);
           
           // Reconstruct the file content
-          let updatedFileContent = `---\n${updatedFrontmatter}\n---\n${markdownContent}`;
-          if (parts.length < 3) { // Original file had no frontmatter, add it now
-             updatedFileContent = `---\n${updatedFrontmatter}\n---\n${fileContent}`; // Use original fileContent as markdown
+          let updatedFileContent = `---\n${updatedFrontmatter}---\n${markdownContent}`;
+          if (parts.length < 3) { // Original file had no frontmatter
+            // Create frontmatter from scratch for a file that had none
+            updatedFileContent = `---\ntitle: ${title}\nghostPostId: ${newPost.id}\npublishedUrl: ${newPost.url}\npublishedDate: ${currentDate}\n---\n${fileContent}`;
           }
 
           await this.app.vault.modify(activeFile, updatedFileContent);
-          new Notice('Frontmatter updated successfully!', 5000);
-          console.log('Frontmatter updated:', updatedFileContent);
+          new Notice('Frontmatter updated.', 4000);
+          console.log('Frontmatter updated.');
+
+          // --- 8. Move File to Published Folder ---
+          const writingFolderPath = this.settings.writingFolderPath;
+          const publishedFolderPath = `${writingFolderPath}/Published`;
+          
+          // Ensure the 'Published' folder exists
+          try {
+            await this.app.vault.createFolder(publishedFolderPath);
+          } catch (e) {
+            // Folder already exists, which is fine.
+          }
+          
+          const newFilePath = `${publishedFolderPath}/${activeFile.name}`;
+          await this.app.vault.rename(activeFile, newFilePath);
+          new Notice(`File moved to "${publishedFolderPath}"`, 5000);
+          console.log(`File moved to ${newFilePath}`);
+
 
         } catch (error) {
           console.error('Error publishing post:', error);
