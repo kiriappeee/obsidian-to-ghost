@@ -7,6 +7,18 @@ const DEFAULT_SETTINGS = {
     writingFolderPath: 'writing',
     ghostApiKeyName: 'ghost-admin-api-key', // Default for new setting
 };
+// ADDED: slugify function
+function slugify(text) {
+    return text
+        .toString()
+        .normalize('NFD') // split an accented letter in the base letter and the acent
+        .replace(/[\u0300-\u036f]/g, '') // remove all previously split accents
+        .toLowerCase()
+        .trim() // Remove whitespace from both sides of a string
+        .replace(/\s+/g, '-') // Replace spaces with -
+        .replace(/[^\w\-]+/g, '') // Remove all non-word chars
+        .replace(/\-\-+/g, '-'); // Replace multiple - with single -
+}
 class ObsidianToGhostPublisher extends obsidian_1.Plugin {
     settings;
     async onload() {
@@ -48,14 +60,17 @@ class ObsidianToGhostPublisher extends obsidian_1.Plugin {
                         // No frontmatter found, whole file is markdown content
                         markdownContent = fileContent.trim();
                     }
-                    const contentSnippet = markdownContent.substring(0, 200) + (markdownContent.length > 200 ? '...' : '');
-                    new obsidian_1.Notice(`Extracted Title: "${title}"\nMarkdown Snippet: "${contentSnippet}"`, 15000);
+                    // Generate slug
+                    const slug = slugify(title);
+                    const contentSnippet = markdownContent.substring(0, 100) + (markdownContent.length > 100 ? '...' : '');
+                    new obsidian_1.Notice(`Title: "${title}"\nSlug: "${slug}"\nMarkdown: "${contentSnippet}"`, 15000);
                     console.log('Extracted Title:', title);
+                    console.log('Generated Slug:', slug);
                     console.log('Extracted Markdown Content:', markdownContent);
                 }
                 catch (error) {
-                    console.error('Error extracting file content:', error);
-                    new obsidian_1.Notice('Error extracting file content. See console for details.', 10000);
+                    console.error('Error processing file:', error);
+                    new obsidian_1.Notice('Error processing file. See console for details.', 10000);
                 }
             },
         });
