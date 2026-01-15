@@ -1,4 +1,5 @@
 import { App, Plugin, PluginSettingTab, Setting, Notice, request, TFile } from 'obsidian';
+import { sign } from 'jsonwebtoken';
 
 // Define the settings interface
 interface GhostPublisherSettings {
@@ -14,17 +15,19 @@ const DEFAULT_SETTINGS: GhostPublisherSettings = {
   ghostApiKeyName: 'ghost-admin-api-key', // Default for new setting
 };
 
-// ADDED: slugify function
-function slugify(text: string): string {
-  return text
-    .toString()
-    .normalize('NFD') // split an accented letter in the base letter and the acent
-    .replace(/[\u0300-\u036f]/g, '') // remove all previously split accents
-    .toLowerCase()
-    .trim() // Remove whitespace from both sides of a string
-    .replace(/\s+/g, '-') // Replace spaces with -
-    .replace(/[^\w\-]+/g, '') // Remove all non-word chars
-    .replace(/\-\-+/g, '-'); // Replace multiple - with single -
+// ADDED: JWT generation function
+function generateGhostAdminToken(apiKey: string): string | null {
+  const [id, secret] = apiKey.split(':');
+  if (!id || !secret) {
+    return null;
+  }
+  const token = sign({}, Buffer.from(secret, 'hex'), {
+    keyid: id,
+    algorithm: 'HS256',
+    expiresIn: '5m',
+    audience: '/admin/'
+  });
+  return token;
 }
 
 export default class ObsidianToGhostPublisher extends Plugin {
@@ -44,52 +47,50 @@ export default class ObsidianToGhostPublisher extends Plugin {
       id: 'publish-to-ghost',
       name: 'Publish to Ghost',
       callback: async () => {
-        const activeFile = this.app.workspace.getActiveFile();
-        if (!activeFile) {
-          new Notice('No active file to publish.');
-          return;
-        }
-
-        if (activeFile.extension !== 'md') {
-          new Notice('Can only publish Markdown files.');
+        // 1. Get Settings
+        const { blogUrl, ghostApiKeyName } = this.settings;
+        if (!blogUrl || !ghostApiKeyName) {
+          new Notice('Blog URL and API Key Name must be set in settings.');
           return;
         }
 
         try {
-          const fileContent = await this.app.vault.read(activeFile);
-          const parts = fileContent.split('---', 3); // Split into [before frontmatter, frontmatter, markdown]
-
-          let frontmatter = '';
-          let markdownContent = fileContent;
-          let title = activeFile.basename; // Default title to filename
-
-          if (parts.length >= 3) {
-            frontmatter = parts[1];
-            markdownContent = parts.slice(2).join('---').trim(); // Join back if there are more '---' in content
-
-            const titleMatch = frontmatter.match(/^title:\s*(.*)/m);
-            if (titleMatch && titleMatch[1]) {
-              // Remove quotes if present
-              title = titleMatch[1].replace(/^['"]|['"]$/g, '').trim();
-            }
-          } else {
-            // No frontmatter found, whole file is markdown content
-            markdownContent = fileContent.trim();
+          // 2. Get API Key
+          const apiKey = await this.app.secretStorage.getSecret(ghostApiKeyName);
+          if (!apiKey) {
+            new Notice(`API Key secret named '${ghostApiKeyName}' not found.`);
+            return;
           }
 
-          // Generate slug
-          const slug = slugify(title);
+          // 3. Generate JWT
+          const token = generateGhostAdminToken(apiKey);
+          if (!token) {
+            new Notice('API Key is not in the correct format (id:secret).');
+            return;
+          }
 
-          const contentSnippet = markdownContent.substring(0, 100) + (markdownContent.length > 100 ? '...' : '');
+          // 4. Make API Request
+          const normalizedUrl = blogUrl.replace(/\/$/, '');
+          const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
 
-          new Notice(`Title: "${title}"\nSlug: "${slug}"\nMarkdown: "${contentSnippet}"`, 15000);
-          console.log('Extracted Title:', title);
-          console.log('Generated Slug:', slug);
-          console.log('Extracted Markdown Content:', markdownContent);
+          new Notice('Attempting to authenticate with Ghost...');
+          
+          const response = await request({
+            url: apiUrl,
+            method: 'GET',
+            headers: {
+              'Authorization': `Ghost ${token}`
+            }
+          });
+          
+          const responseData = JSON.parse(response);
+          
+          new Notice(`Successfully authenticated! Found ${responseData.posts.length} posts.`, 10000);
+          console.log('Ghost Posts:', responseData);
 
         } catch (error) {
-          console.error('Error processing file:', error);
-          new Notice('Error processing file. See console for details.', 10000);
+          console.error('Error authenticating with Ghost:', error);
+          new Notice('Error authenticating with Ghost. Check settings and API key.', 10000);
         }
       },
     });

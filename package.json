@@ -4,14 +4,17 @@
   "description": "An Obsidian plugin to publish markdown files to Ghost CMS.",
   "main": "main.js",
   "scripts": {
-    "dev": "tsc -watch",
-    "build": "tsc"
+    "dev": "esbuild main.ts --bundle --outfile=main.js --platform=node --external:obsidian --watch",
+    "build": "esbuild main.ts --bundle --outfile=main.js --platform=node --external:obsidian"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^16.11.7",
+    "esbuild": "^0.23.0",
+    "jsonwebtoken": "^9.0.2",
     "obsidian": "latest",
     "tslib": "^2.3.1",
     "typescript": "^4.4.4"
