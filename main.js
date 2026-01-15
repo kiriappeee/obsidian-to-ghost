@@ -20,26 +20,42 @@ class ObsidianToGhostPublisher extends obsidian_1.Plugin {
             id: 'publish-to-ghost',
             name: 'Publish to Ghost',
             callback: async () => {
-                const blogUrl = this.settings.blogUrl;
-                if (!blogUrl) {
-                    new obsidian_1.Notice('Blog URL is not set in plugin settings.');
+                const activeFile = this.app.workspace.getActiveFile();
+                if (!activeFile) {
+                    new obsidian_1.Notice('No active file to publish.');
                     return;
                 }
-                // Handle trailing slash and construct URL
-                const normalizedUrl = blogUrl.replace(/\/$/, '');
-                const apiUrl = `${normalizedUrl}/ghost/api/admin/site/`;
+                if (activeFile.extension !== 'md') {
+                    new obsidian_1.Notice('Can only publish Markdown files.');
+                    return;
+                }
                 try {
-                    new obsidian_1.Notice(`Fetching from ${apiUrl}...`);
-                    const response = await (0, obsidian_1.request)({ url: apiUrl });
-                    const siteData = JSON.parse(response);
-                    // Display a summary of the site data
-                    const noticeMessage = `Site Title: ${siteData.site.title}\nSite URL: ${siteData.site.url}`;
-                    new obsidian_1.Notice(noticeMessage, 10000); // Show for 10 seconds
-                    console.log('Ghost Site Data:', siteData);
+                    const fileContent = await this.app.vault.read(activeFile);
+                    const parts = fileContent.split('---', 3); // Split into [before frontmatter, frontmatter, markdown]
+                    let frontmatter = '';
+                    let markdownContent = fileContent;
+                    let title = activeFile.basename; // Default title to filename
+                    if (parts.length >= 3) {
+                        frontmatter = parts[1];
+                        markdownContent = parts.slice(2).join('---').trim(); // Join back if there are more '---' in content
+                        const titleMatch = frontmatter.match(/^title:\s*(.*)/m);
+                        if (titleMatch && titleMatch[1]) {
+                            // Remove quotes if present
+                            title = titleMatch[1].replace(/^['"]|['"]$/g, '').trim();
+                        }
+                    }
+                    else {
+                        // No frontmatter found, whole file is markdown content
+                        markdownContent = fileContent.trim();
+                    }
+                    const contentSnippet = markdownContent.substring(0, 200) + (markdownContent.length > 200 ? '...' : '');
+                    new obsidian_1.Notice(`Extracted Title: "${title}"\nMarkdown Snippet: "${contentSnippet}"`, 15000);
+                    console.log('Extracted Title:', title);
+                    console.log('Extracted Markdown Content:', markdownContent);
                 }
                 catch (error) {
-                    console.error('Error fetching Ghost site data:', error);
-                    new obsidian_1.Notice('Error fetching Ghost site data. Is the Blog URL correct and is Ghost running?', 10000);
+                    console.error('Error extracting file content:', error);
+                    new obsidian_1.Notice('Error extracting file content. See console for details.', 10000);
                 }
             },
         });
