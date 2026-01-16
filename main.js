@@ -4290,10 +4290,14 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           let frontmatter = "";
           let markdownContent = fileContent;
           let title = activeFile.basename;
+          let ghostTagsString = null;
+          let ghostExcerptString = null;
           if (parts.length >= 3) {
             frontmatter = parts[1];
             markdownContent = parts.slice(2).join("---").trim();
             title = this.parseFrontmatterString(frontmatter, "title") || activeFile.basename;
+            ghostTagsString = this.parseFrontmatterString(frontmatter, "ghostTags");
+            ghostExcerptString = this.parseFrontmatterString(frontmatter, "ghostExcerpt");
           } else {
             markdownContent = fileContent.trim();
           }
@@ -4315,6 +4319,7 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           const markdownWithImages = await this.uploadAndReplaceImages(markdownContent, token, activeFile.path);
           const finalMarkdown = await this.resolveInternalLinks(markdownWithImages, activeFile.path);
           const slug = slugify(title);
+          const processedTags = ghostTagsString ? ghostTagsString.split(",").map((tag) => ({ name: tag.trim() })).filter((tag) => tag.name.length > 0) : [];
           const mobiledocPayload = {
             version: "0.3.1",
             atoms: [],
@@ -4325,6 +4330,7 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
             sections: [[10, 0]]
           };
           const postPayload = {
+            // Use any for dynamic properties
             posts: [{
               title,
               slug,
@@ -4332,6 +4338,12 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
               mobiledoc: JSON.stringify(mobiledocPayload)
             }]
           };
+          if (processedTags.length > 0) {
+            postPayload.posts[0].tags = processedTags;
+          }
+          if (ghostExcerptString) {
+            postPayload.posts[0].custom_excerpt = ghostExcerptString;
+          }
           const normalizedUrl = blogUrl.replace(/\/$/, "");
           const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
           new import_obsidian.Notice(`Attempting to publish "${title}"...`);

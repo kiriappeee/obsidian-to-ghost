@@ -209,11 +209,15 @@ export default class ObsidianToGhostPublisher extends Plugin {
           let frontmatter = '';
           let markdownContent = fileContent;
           let title = activeFile.basename;
+          let ghostTagsString: string | null = null; // Declare here
+          let ghostExcerptString: string | null = null; // Declare here
 
           if (parts.length >= 3) {
             frontmatter = parts[1];
             markdownContent = parts.slice(2).join('---').trim();
             title = this.parseFrontmatterString(frontmatter, 'title') || activeFile.basename;
+            ghostTagsString = this.parseFrontmatterString(frontmatter, 'ghostTags'); // Extract tags
+            ghostExcerptString = this.parseFrontmatterString(frontmatter, 'ghostExcerpt'); // Extract excerpt
           } else {
             markdownContent = fileContent.trim();
           }
@@ -244,8 +248,13 @@ export default class ObsidianToGhostPublisher extends Plugin {
 
           // --- 5. Generate Slug ---
           const slug = slugify(title);
+
+          // --- 6. Process Tags ---
+          const processedTags = ghostTagsString
+            ? ghostTagsString.split(',').map(tag => ({ name: tag.trim() })).filter(tag => tag.name.length > 0)
+            : [];
           
-          // --- 6. Construct Mobiledoc Payload ---
+          // --- 7. Construct Mobiledoc Payload ---
           const mobiledocPayload = {
             version: '0.3.1',
             atoms: [],
@@ -256,7 +265,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
             sections: [[10, 0]]
           };
 
-          const postPayload = {
+          const postPayload: any = { // Use any for dynamic properties
             posts: [{
               title: title,
               slug: slug,
@@ -265,7 +274,14 @@ export default class ObsidianToGhostPublisher extends Plugin {
             }]
           };
 
-          // --- 7. Make API Request (POST) ---
+          if (processedTags.length > 0) {
+            postPayload.posts[0].tags = processedTags;
+          }
+          if (ghostExcerptString) {
+            postPayload.posts[0].custom_excerpt = ghostExcerptString;
+          }
+
+          // --- 8. Make API Request (POST) ---
           const normalizedUrl = blogUrl.replace(/\/$/, '');
           const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
 
