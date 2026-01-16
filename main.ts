@@ -1,5 +1,5 @@
 import { App, Plugin, PluginSettingTab, Setting, Notice, requestUrl, RequestUrlParam, TFile } from 'obsidian';
-import { sign } from 'jsonwebtoken';
+
 import { FormDataEncoder } from 'form-data-encoder';
 
 // Define the settings interface
@@ -29,19 +29,54 @@ function slugify(text: string): string {
     .replace(/\-\-+/g, '-'); // Replace multiple - with single -
 }
 
+
+
+import { sign } from 'jsonwebtoken';
+
+
+
+import * as CryptoJS from 'crypto-js';
+
 // Helper: JWT generation function
 function generateGhostAdminToken(apiKey: string): string | null {
-  const [id, secret] = apiKey.split(':');
-  if (!id || !secret) {
-    return null;
-  }
-  const token = sign({}, Buffer.from(secret, 'hex'), {
-    keyid: id,
-    algorithm: 'HS256',
-    expiresIn: '5m',
-    audience: '/admin/'
-  });
-  return token;
+    const [id, secret] = apiKey.split(':');
+    if (!id || !secret) {
+        return null;
+    }
+
+    const header = {
+        alg: 'HS256',
+        typ: 'JWT',
+        kid: id
+    };
+
+    const payload = {
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + (5 * 60),
+        aud: '/admin/'
+    };
+
+    function base64url(source: any) {
+        // Encode in classical base64
+        let encodedSource = CryptoJS.enc.Base64.stringify(source);
+
+        // Remove padding equal characters
+        encodedSource = encodedSource.replace(/=+$/, '');
+
+        // Replace characters according to base64url specifications
+        encodedSource = encodedSource.replace(/\+/g, '-');
+        encodedSource = encodedSource.replace(/\//g, '_');
+
+        return encodedSource;
+    }
+
+    const encodedHeader = base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(header)));
+    const encodedPayload = base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(payload)));
+
+    const signature = CryptoJS.HmacSHA256(encodedHeader + '.' + encodedPayload, CryptoJS.enc.Hex.parse(secret));
+    const encodedSignature = base64url(signature);
+
+    return encodedHeader + '.' + encodedPayload + '.' + encodedSignature;
 }
 
 export default class ObsidianToGhostPublisher extends Plugin {
@@ -147,7 +182,18 @@ export default class ObsidianToGhostPublisher extends Plugin {
       for await (const chunk of encoder) {
         chunks.push(chunk);
       }
-      const bodyBuffer = Buffer.concat(chunks);
+      
+      // Concatenate Uint8Array chunks
+      let totalLength = 0;
+      for (const chunk of chunks) {
+        totalLength += chunk.length;
+      }
+      const concatenated = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const chunk of chunks) {
+        concatenated.set(chunk, offset);
+        offset += chunk.length;
+      }
       
       const normalizedUrl = this.settings.blogUrl.replace(/\/$/, '');
       const uploadUrl = `${normalizedUrl}/ghost/api/admin/images/upload/`;
@@ -159,7 +205,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
           'Authorization': `Ghost ${token}`,
           'Content-Type': encoder.headers['Content-Type'],
         },
-        body: bodyBuffer.buffer.slice(bodyBuffer.byteOffset, bodyBuffer.byteOffset + bodyBuffer.byteLength),
+        body: concatenated.buffer,
         throw: false
       };
 
