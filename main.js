@@ -7070,7 +7070,8 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
             if (fetchResponse.status < 200 || fetchResponse.status >= 300) {
               throw new Error(`Failed to fetch post for update: Status ${fetchResponse.status} - ${fetchResponse.text}`);
             }
-            const updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+            const currentPost = fetchResponse.json.posts[0];
+            const updatedAt = currentPost.updated_at;
             const updatePayload = {
               posts: [{
                 title,
