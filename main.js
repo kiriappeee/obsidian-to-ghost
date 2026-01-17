@@ -6880,7 +6880,7 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
     return mimeTypes[extension.toLowerCase()] || "application/octet-stream";
   }
   parseFrontmatterString(fmString, field) {
-    const regex = new RegExp(`^${field}:\\s*(.*)`, "m");
+    const regex = new RegExp(`^${field}:[ \\t]*(.*)`, "m");
     const match = fmString.match(regex);
     return match ? match[1].replace(/^['"]|['"]$/g, "").trim() : null;
   }
@@ -7002,12 +7002,14 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           let title = activeFile.basename;
           let ghostTagsString = null;
           let ghostExcerptString = null;
+          let ghostPostId = null;
           if (parts.length >= 3) {
             frontmatter = parts[1];
             markdownContent = parts.slice(2).join("---").trim();
             title = this.parseFrontmatterString(frontmatter, "title") || activeFile.basename;
             ghostTagsString = this.parseFrontmatterString(frontmatter, "ghostTags");
             ghostExcerptString = this.parseFrontmatterString(frontmatter, "ghostExcerpt");
+            ghostPostId = this.parseFrontmatterString(frontmatter, "ghostPostId");
           } else {
             markdownContent = fileContent.trim();
           }
@@ -7030,52 +7032,119 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           const finalMarkdown = await this.resolveInternalLinks(markdownWithImages, activeFile.path);
           const slug = slugify(title);
           const processedTags = ghostTagsString ? ghostTagsString.split(",").map((tag) => ({ name: tag.trim() })).filter((tag) => tag.name.length > 0) : [];
-          const mobiledocPayload = {
-            version: "0.3.1",
-            atoms: [],
-            cards: [
-              ["markdown", { cardName: "markdown", markdown: finalMarkdown }]
-            ],
-            markups: [],
-            sections: [[10, 0]]
+          const lexicalPayload = {
+            root: {
+              children: [
+                {
+                  type: "markdown",
+                  version: 1,
+                  markdown: finalMarkdown
+                }
+              ],
+              direction: null,
+              format: "",
+              indent: 0,
+              type: "root",
+              version: 1
+            }
           };
-          const postPayload = {
-            // Use any for dynamic properties
-            posts: [{
-              title,
-              slug,
-              status: "published",
-              mobiledoc: JSON.stringify(mobiledocPayload)
-            }]
-          };
-          if (processedTags.length > 0) {
-            postPayload.posts[0].tags = processedTags;
-          }
-          if (ghostExcerptString) {
-            postPayload.posts[0].custom_excerpt = ghostExcerptString;
-          }
           const normalizedUrl = blogUrl.replace(/\/$/, "");
-          const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
-          new import_obsidian.Notice(`Attempting to publish "${title}"...`);
-          console.log("Sending post payload:", postPayload);
-          const postRequestParams = {
-            url: apiUrl,
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Ghost ${token}`
-            },
-            body: JSON.stringify(postPayload),
-            throw: false
-          };
-          const response = await (0, import_obsidian.requestUrl)(postRequestParams);
-          if (response.status < 200 || response.status >= 300) {
-            throw new Error(`Post creation failed: Status ${response.status} - ${response.text}`);
+          let responseData;
+          let newPost;
+          if (ghostPostId) {
+            new import_obsidian.Notice(`Updating post "${title}"...`);
+            const fetchUrl = `${normalizedUrl}/ghost/api/admin/posts/${ghostPostId}/`;
+            const fetchParams = {
+              url: fetchUrl,
+              method: "GET",
+              headers: {
+                "Authorization": `Ghost ${token}`,
+                "Content-Type": "application/json"
+              },
+              throw: false
+            };
+            const fetchResponse = await (0, import_obsidian.requestUrl)(fetchParams);
+            if (fetchResponse.status === 404) {
+              throw new Error("Post not found on Ghost. Please check if it was deleted.");
+            }
+            if (fetchResponse.status < 200 || fetchResponse.status >= 300) {
+              throw new Error(`Failed to fetch post for update: Status ${fetchResponse.status} - ${fetchResponse.text}`);
+            }
+            const currentPost = fetchResponse.json.posts[0];
+            const updatedAt = currentPost.updated_at;
+            const updatePayload = {
+              posts: [{
+                title,
+                slug,
+                status: "published",
+                lexical: JSON.stringify(lexicalPayload),
+                updated_at: updatedAt
+                // Required for optimistic locking
+              }]
+            };
+            if (processedTags.length > 0) {
+              updatePayload.posts[0].tags = processedTags;
+            }
+            if (ghostExcerptString) {
+              updatePayload.posts[0].custom_excerpt = ghostExcerptString;
+            }
+            console.log("Sending update payload:", updatePayload);
+            const updateParams = {
+              url: fetchUrl,
+              // PUT to the same ID URL
+              method: "PUT",
+              headers: {
+                "Authorization": `Ghost ${token}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify(updatePayload),
+              throw: false
+            };
+            const updateResponse = await (0, import_obsidian.requestUrl)(updateParams);
+            if (updateResponse.status < 200 || updateResponse.status >= 300) {
+              throw new Error(`Post update failed: Status ${updateResponse.status} - ${updateResponse.text}`);
+            }
+            responseData = updateResponse.json;
+            newPost = responseData.posts[0];
+            new import_obsidian.Notice(`Updated "${newPost.title}"! URL: ${newPost.url}`, 5e3);
+          } else {
+            new import_obsidian.Notice(`Attempting to publish "${title}"...`);
+            const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
+            const postPayload = {
+              // Use any for dynamic properties
+              posts: [{
+                title,
+                slug,
+                status: "published",
+                lexical: JSON.stringify(lexicalPayload)
+              }]
+            };
+            if (processedTags.length > 0) {
+              postPayload.posts[0].tags = processedTags;
+            }
+            if (ghostExcerptString) {
+              postPayload.posts[0].custom_excerpt = ghostExcerptString;
+            }
+            console.log("Sending post payload:", postPayload);
+            const postRequestParams = {
+              url: apiUrl,
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Ghost ${token}`
+              },
+              body: JSON.stringify(postPayload),
+              throw: false
+            };
+            const response = await (0, import_obsidian.requestUrl)(postRequestParams);
+            if (response.status < 200 || response.status >= 300) {
+              throw new Error(`Post creation failed: Status ${response.status} - ${response.text}`);
+            }
+            responseData = response.json;
+            newPost = responseData.posts[0];
+            new import_obsidian.Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15e3);
           }
-          const responseData = response.json;
-          const newPost = responseData.posts[0];
-          new import_obsidian.Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15e3);
-          console.log("Successfully published post:", newPost);
+          console.log("Successfully processed post:", newPost);
           const currentDate = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
           let updatedFrontmatter = frontmatter;
           const updateFrontmatterField = (fmString, field, value) => {
@@ -7097,7 +7166,10 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           };
           updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "ghostPostId", newPost.id);
           updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "publishedUrl", newPost.url);
-          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "publishedDate", currentDate);
+          if (!ghostPostId) {
+            updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, "publishedDate", currentDate);
+          } else {
+          }
           let updatedFileContent = `---
 ${updatedFrontmatter}---
 ${markdownContent}`;
@@ -7115,14 +7187,18 @@ ${fileContent}`;
           console.log("Frontmatter updated.");
           const writingFolderPath = this.settings.writingFolderPath;
           const publishedFolderPath = `${writingFolderPath}/Published`;
-          try {
-            await this.app.vault.createFolder(publishedFolderPath);
-          } catch (e) {
+          if (!activeFile.path.startsWith(`${publishedFolderPath}/`)) {
+            try {
+              await this.app.vault.createFolder(publishedFolderPath);
+            } catch (e) {
+            }
+            const newFilePath = `${publishedFolderPath}/${activeFile.name}`;
+            await this.app.vault.rename(activeFile, newFilePath);
+            new import_obsidian.Notice(`File moved to "${publishedFolderPath}"`, 5e3);
+            console.log(`File moved to ${newFilePath}`);
+          } else {
+            console.log("File is already in Published folder. Skipping move.");
           }
-          const newFilePath = `${publishedFolderPath}/${activeFile.name}`;
-          await this.app.vault.rename(activeFile, newFilePath);
-          new import_obsidian.Notice(`File moved to "${publishedFolderPath}"`, 5e3);
-          console.log(`File moved to ${newFilePath}`);
         } catch (error) {
           console.error("--- DETAILED PUBLISH ERROR ---");
           console.error("Error Object:", error);
