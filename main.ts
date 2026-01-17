@@ -250,7 +250,6 @@ export default class ObsidianToGhostPublisher extends Plugin {
 
         try {
           const fileContent = await this.app.vault.read(activeFile);
-          const parts = fileContent.split('---', 3);
 
           let frontmatter = '';
           let markdownContent = fileContent;
@@ -258,16 +257,35 @@ export default class ObsidianToGhostPublisher extends Plugin {
           let ghostTagsString: string | null = null; // Declare here
           let ghostExcerptString: string | null = null; // Declare here
           let ghostPostId: string | null = null; // To check if updating
+          let hasFrontmatter = false;
 
-          if (parts.length >= 3) {
-            frontmatter = parts[1];
-            markdownContent = parts.slice(2).join('---').trim();
-            title = this.parseFrontmatterString(frontmatter, 'title') || activeFile.basename;
-            ghostTagsString = this.parseFrontmatterString(frontmatter, 'ghostTags'); // Extract tags
-            ghostExcerptString = this.parseFrontmatterString(frontmatter, 'ghostExcerpt'); // Extract excerpt
-            ghostPostId = this.parseFrontmatterString(frontmatter, 'ghostPostId'); // Check for ID
+          const startMatch = fileContent.match(/^---\s*$/m);
+          if (startMatch) {
+              const preMatch = fileContent.substring(0, startMatch.index);
+              // Only consider it frontmatter if it's at the start (ignoring empty lines)
+              if (/^\s*$/.test(preMatch)) {
+                  const startIndex = (startMatch.index ?? 0) + startMatch[0].length;
+                  const rest = fileContent.substring(startIndex);
+                  const endMatch = rest.match(/^---\s*$/m);
+
+                  if (endMatch) {
+                      hasFrontmatter = true;
+                      const endIndexRel = endMatch.index ?? 0;
+                      frontmatter = rest.substring(0, endIndexRel);
+                      markdownContent = rest.substring(endIndexRel + endMatch[0].length).trim();
+
+                      title = this.parseFrontmatterString(frontmatter, 'title') || activeFile.basename;
+                      ghostTagsString = this.parseFrontmatterString(frontmatter, 'ghostTags'); // Extract tags
+                      ghostExcerptString = this.parseFrontmatterString(frontmatter, 'ghostExcerpt'); // Extract excerpt
+                      ghostPostId = this.parseFrontmatterString(frontmatter, 'ghostPostId'); // Check for ID
+                  } else {
+                      markdownContent = fileContent.trim();
+                  }
+              } else {
+                   markdownContent = fileContent.trim();
+              }
           } else {
-            markdownContent = fileContent.trim();
+              markdownContent = fileContent.trim();
           }
 
           // --- 2. Get Settings and API Key ---
@@ -484,7 +502,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
 
           
           let updatedFileContent = `---\n${updatedFrontmatter}---\n${markdownContent}`;
-          if (parts.length < 3) {
+          if (!hasFrontmatter) {
              // If there was no frontmatter, we create it. This is definitely a creation event (since we need ghostPostId for update).
             updatedFileContent = `---\ntitle: ${title}\nghostPostId: ${newPost.id}\npublishedUrl: ${newPost.url}\npublishedDate: ${currentDate}\n---\n${fileContent}`;
           }
