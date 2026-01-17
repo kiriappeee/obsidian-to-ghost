@@ -343,8 +343,9 @@ export default class ObsidianToGhostPublisher extends Plugin {
                 throw new Error(`Failed to fetch post for update: Status ${fetchResponse.status} - ${fetchResponse.text}`);
             }
 
-            const currentPost = fetchResponse.json.posts[0];
-            const updatedAt = currentPost.updated_at;
+            // const currentPost = fetchResponse.json.posts[0];
+            // const updatedAt = currentPost.updated_at;
+            const updatedAt = new Date().toISOString();
 
             const updatePayload: any = {
                 posts: [{
