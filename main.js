@@ -6996,20 +6996,35 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
         }
         try {
           const fileContent = await this.app.vault.read(activeFile);
-          const parts = fileContent.split("---", 3);
           let frontmatter = "";
           let markdownContent = fileContent;
           let title = activeFile.basename;
           let ghostTagsString = null;
           let ghostExcerptString = null;
           let ghostPostId = null;
-          if (parts.length >= 3) {
-            frontmatter = parts[1];
-            markdownContent = parts.slice(2).join("---").trim();
-            title = this.parseFrontmatterString(frontmatter, "title") || activeFile.basename;
-            ghostTagsString = this.parseFrontmatterString(frontmatter, "ghostTags");
-            ghostExcerptString = this.parseFrontmatterString(frontmatter, "ghostExcerpt");
-            ghostPostId = this.parseFrontmatterString(frontmatter, "ghostPostId");
+          let hasFrontmatter = false;
+          const startMatch = fileContent.match(/^---\s*$/m);
+          if (startMatch) {
+            const preMatch = fileContent.substring(0, startMatch.index);
+            if (/^\s*$/.test(preMatch)) {
+              const startIndex = (startMatch.index ?? 0) + startMatch[0].length;
+              const rest = fileContent.substring(startIndex);
+              const endMatch = rest.match(/^---\s*$/m);
+              if (endMatch) {
+                hasFrontmatter = true;
+                const endIndexRel = endMatch.index ?? 0;
+                frontmatter = rest.substring(0, endIndexRel);
+                markdownContent = rest.substring(endIndexRel + endMatch[0].length).trim();
+                title = this.parseFrontmatterString(frontmatter, "title") || activeFile.basename;
+                ghostTagsString = this.parseFrontmatterString(frontmatter, "ghostTags");
+                ghostExcerptString = this.parseFrontmatterString(frontmatter, "ghostExcerpt");
+                ghostPostId = this.parseFrontmatterString(frontmatter, "ghostPostId");
+              } else {
+                markdownContent = fileContent.trim();
+              }
+            } else {
+              markdownContent = fileContent.trim();
+            }
           } else {
             markdownContent = fileContent.trim();
           }
@@ -7173,7 +7188,7 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           let updatedFileContent = `---
 ${updatedFrontmatter}---
 ${markdownContent}`;
-          if (parts.length < 3) {
+          if (!hasFrontmatter) {
             updatedFileContent = `---
 title: ${title}
 ghostPostId: ${newPost.id}
