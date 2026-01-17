@@ -6880,7 +6880,7 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
     return mimeTypes[extension.toLowerCase()] || "application/octet-stream";
   }
   parseFrontmatterString(fmString, field) {
-    const regex = new RegExp(`^${field}:\\s*(.*)`, "m");
+    const regex = new RegExp(`^${field}:[ \\t]*(.*)`, "m");
     const match = fmString.match(regex);
     return match ? match[1].replace(/^['"]|['"]$/g, "").trim() : null;
   }

@@ -94,7 +94,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
   }
 
   private parseFrontmatterString(fmString: string, field: string): string | null {
-    const regex = new RegExp(`^${field}:\\s*(.*)`, 'm');
+    const regex = new RegExp(`^${field}:[ \\t]*(.*)`, 'm');
     const match = fmString.match(regex);
     return match ? match[1].replace(/^['"]|['"]$/g, '').trim() : null;
   }
