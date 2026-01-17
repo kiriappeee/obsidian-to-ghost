@@ -302,15 +302,25 @@ export default class ObsidianToGhostPublisher extends Plugin {
             ? ghostTagsString.split(',').map(tag => ({ name: tag.trim() })).filter(tag => tag.name.length > 0)
             : [];
           
-          // --- 7. Construct Mobiledoc Payload ---
-          const mobiledocPayload = {
-            version: '0.3.1',
-            atoms: [],
-            cards: [
-              ['markdown', { cardName: 'markdown', markdown: finalMarkdown }]
-            ],
-            markups: [],
-            sections: [[10, 0]]
+          // --- 7. Construct Lexical Payload ---
+          // NOTE: Ghost 5.x uses Lexical as the editor. While Mobiledoc is supported for backward compatibility,
+          // if a post has been edited in Ghost's new editor, it expects 'lexical' field updates.
+
+          const lexicalPayload = {
+            root: {
+              children: [
+                {
+                  type: "markdown",
+                  version: 1,
+                  markdown: finalMarkdown
+                }
+              ],
+              direction: null,
+              format: "",
+              indent: 0,
+              type: "root",
+              version: 1
+            }
           };
 
           const normalizedUrl = blogUrl.replace(/\/$/, '');
@@ -352,7 +362,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
                     title: title,
                     slug: slug,
                     status: 'published',
-                    mobiledoc: JSON.stringify(mobiledocPayload),
+                    lexical: JSON.stringify(lexicalPayload),
                     updated_at: updatedAt // Required for optimistic locking
                 }]
             };
@@ -397,7 +407,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
                 title: title,
                 slug: slug,
                 status: 'published',
-                mobiledoc: JSON.stringify(mobiledocPayload)
+                lexical: JSON.stringify(lexicalPayload)
                 }]
             };
 

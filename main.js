@@ -7032,14 +7032,21 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
           const finalMarkdown = await this.resolveInternalLinks(markdownWithImages, activeFile.path);
           const slug = slugify(title);
           const processedTags = ghostTagsString ? ghostTagsString.split(",").map((tag) => ({ name: tag.trim() })).filter((tag) => tag.name.length > 0) : [];
-          const mobiledocPayload = {
-            version: "0.3.1",
-            atoms: [],
-            cards: [
-              ["markdown", { cardName: "markdown", markdown: finalMarkdown }]
-            ],
-            markups: [],
-            sections: [[10, 0]]
+          const lexicalPayload = {
+            root: {
+              children: [
+                {
+                  type: "markdown",
+                  version: 1,
+                  markdown: finalMarkdown
+                }
+              ],
+              direction: null,
+              format: "",
+              indent: 0,
+              type: "root",
+              version: 1
+            }
           };
           const normalizedUrl = blogUrl.replace(/\/$/, "");
           let responseData;
@@ -7069,7 +7076,7 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
                 title,
                 slug,
                 status: "published",
-                mobiledoc: JSON.stringify(mobiledocPayload),
+                lexical: JSON.stringify(lexicalPayload),
                 updated_at: updatedAt
                 // Required for optimistic locking
               }]
@@ -7108,7 +7115,7 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
                 title,
                 slug,
                 status: "published",
-                mobiledoc: JSON.stringify(mobiledocPayload)
+                lexical: JSON.stringify(lexicalPayload)
               }]
             };
             if (processedTags.length > 0) {
