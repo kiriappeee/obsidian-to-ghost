@@ -257,6 +257,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
           let title = activeFile.basename;
           let ghostTagsString: string | null = null; // Declare here
           let ghostExcerptString: string | null = null; // Declare here
+          let ghostPostId: string | null = null; // To check if updating
 
           if (parts.length >= 3) {
             frontmatter = parts[1];
@@ -264,6 +265,7 @@ export default class ObsidianToGhostPublisher extends Plugin {
             title = this.parseFrontmatterString(frontmatter, 'title') || activeFile.basename;
             ghostTagsString = this.parseFrontmatterString(frontmatter, 'ghostTags'); // Extract tags
             ghostExcerptString = this.parseFrontmatterString(frontmatter, 'ghostExcerpt'); // Extract excerpt
+            ghostPostId = this.parseFrontmatterString(frontmatter, 'ghostPostId'); // Check for ID
           } else {
             markdownContent = fileContent.trim();
           }
@@ -311,51 +313,125 @@ export default class ObsidianToGhostPublisher extends Plugin {
             sections: [[10, 0]]
           };
 
-          const postPayload: any = { // Use any for dynamic properties
-            posts: [{
-              title: title,
-              slug: slug,
-              status: 'published',
-              mobiledoc: JSON.stringify(mobiledocPayload)
-            }]
-          };
-
-          if (processedTags.length > 0) {
-            postPayload.posts[0].tags = processedTags;
-          }
-          if (ghostExcerptString) {
-            postPayload.posts[0].custom_excerpt = ghostExcerptString;
-          }
-
-          // --- 8. Make API Request (POST) ---
           const normalizedUrl = blogUrl.replace(/\/$/, '');
-          const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
 
-          new Notice(`Attempting to publish "${title}"...`);
-          console.log('Sending post payload:', postPayload);
+          let responseData;
+          let newPost;
 
-          const postRequestParams: RequestUrlParam = {
-            url: apiUrl,
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Ghost ${token}`
-            },
-            body: JSON.stringify(postPayload),
-            throw: false
-          };
+          if (ghostPostId) {
+            // --- UPDATE PATH ---
+            new Notice(`Updating post "${title}"...`);
 
-          const response = await requestUrl(postRequestParams);
+            // Fetch the existing post to get updated_at
+            const fetchUrl = `${normalizedUrl}/ghost/api/admin/posts/${ghostPostId}/`;
+             const fetchParams: RequestUrlParam = {
+                url: fetchUrl,
+                method: 'GET',
+                headers: {
+                  'Authorization': `Ghost ${token}`,
+                  'Content-Type': 'application/json'
+                },
+                throw: false
+            };
 
-          if (response.status < 200 || response.status >= 300) {
-            throw new Error(`Post creation failed: Status ${response.status} - ${response.text}`);
+            const fetchResponse = await requestUrl(fetchParams);
+
+            if (fetchResponse.status === 404) {
+                 throw new Error('Post not found on Ghost. Please check if it was deleted.');
+            }
+             if (fetchResponse.status < 200 || fetchResponse.status >= 300) {
+                throw new Error(`Failed to fetch post for update: Status ${fetchResponse.status} - ${fetchResponse.text}`);
+            }
+
+            const currentPost = fetchResponse.json.posts[0];
+            const updatedAt = currentPost.updated_at;
+
+            const updatePayload: any = {
+                posts: [{
+                    title: title,
+                    slug: slug,
+                    status: 'published',
+                    mobiledoc: JSON.stringify(mobiledocPayload),
+                    updated_at: updatedAt // Required for optimistic locking
+                }]
+            };
+
+            if (processedTags.length > 0) {
+                updatePayload.posts[0].tags = processedTags;
+            }
+            if (ghostExcerptString) {
+                updatePayload.posts[0].custom_excerpt = ghostExcerptString;
+            }
+
+            console.log('Sending update payload:', updatePayload);
+
+             const updateParams: RequestUrlParam = {
+                url: fetchUrl, // PUT to the same ID URL
+                method: 'PUT',
+                headers: {
+                  'Authorization': `Ghost ${token}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updatePayload),
+                throw: false
+            };
+
+            const updateResponse = await requestUrl(updateParams);
+
+             if (updateResponse.status < 200 || updateResponse.status >= 300) {
+                throw new Error(`Post update failed: Status ${updateResponse.status} - ${updateResponse.text}`);
+            }
+
+            responseData = updateResponse.json;
+            newPost = responseData.posts[0];
+             new Notice(`Updated "${newPost.title}"! URL: ${newPost.url}`, 5000);
+
+          } else {
+            // --- CREATE PATH ---
+            new Notice(`Attempting to publish "${title}"...`);
+            const apiUrl = `${normalizedUrl}/ghost/api/admin/posts/`;
+
+            const postPayload: any = { // Use any for dynamic properties
+                posts: [{
+                title: title,
+                slug: slug,
+                status: 'published',
+                mobiledoc: JSON.stringify(mobiledocPayload)
+                }]
+            };
+
+            if (processedTags.length > 0) {
+                postPayload.posts[0].tags = processedTags;
+            }
+            if (ghostExcerptString) {
+                postPayload.posts[0].custom_excerpt = ghostExcerptString;
+            }
+
+            console.log('Sending post payload:', postPayload);
+
+            const postRequestParams: RequestUrlParam = {
+                url: apiUrl,
+                method: 'POST',
+                headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Ghost ${token}`
+                },
+                body: JSON.stringify(postPayload),
+                throw: false
+            };
+
+            const response = await requestUrl(postRequestParams);
+
+            if (response.status < 200 || response.status >= 300) {
+                throw new Error(`Post creation failed: Status ${response.status} - ${response.text}`);
+            }
+
+            responseData = response.json;
+            newPost = responseData.posts[0];
+            new Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15000);
           }
           
-          const responseData = response.json;
-          const newPost = responseData.posts[0];
-
-          new Notice(`Published "${newPost.title}"! ID: ${newPost.id}, URL: ${newPost.url}`, 15000);
-          console.log('Successfully published post:', newPost);
+          console.log('Successfully processed post:', newPost);
 
           // --- 8. Update Frontmatter in Obsidian ---
           const currentDate = new Date().toISOString().split('T')[0];
@@ -383,10 +459,22 @@ export default class ObsidianToGhostPublisher extends Plugin {
           
           updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'ghostPostId', newPost.id);
           updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'publishedUrl', newPost.url);
-          updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'publishedDate', currentDate);
+          // Only add publishedDate if it was a creation event or if it's missing (though logic here updates it if we want, I'll stick to updating it only if creating)
+          if (!ghostPostId) {
+             updatedFrontmatter = updateFrontmatterField(updatedFrontmatter, 'publishedDate', currentDate);
+          } else {
+              // If it's an update, we might want to ensure publishedDate exists, but let's leave it unless missing.
+              // Actually, user didn't specify, but safer to not overwrite original published date.
+              // If it's missing in frontmatter, maybe add it?
+              // Let's simpler: just add it if not present? The regex `^${field}:.*` handles replacement.
+              // If I don't call updateFrontmatterField for 'publishedDate', it won't be touched.
+              // But for safety, I'll only add it if I'm creating.
+          }
+
           
           let updatedFileContent = `---\n${updatedFrontmatter}---\n${markdownContent}`;
           if (parts.length < 3) {
+             // If there was no frontmatter, we create it. This is definitely a creation event (since we need ghostPostId for update).
             updatedFileContent = `---\ntitle: ${title}\nghostPostId: ${newPost.id}\npublishedUrl: ${newPost.url}\npublishedDate: ${currentDate}\n---\n${fileContent}`;
           }
 
@@ -398,16 +486,26 @@ export default class ObsidianToGhostPublisher extends Plugin {
           const writingFolderPath = this.settings.writingFolderPath;
           const publishedFolderPath = `${writingFolderPath}/Published`;
           
-          try {
-            await this.app.vault.createFolder(publishedFolderPath);
-          } catch (e) {
-            // Folder already exists, which is fine.
+          // Check if file is already in the published folder
+          if (!activeFile.path.startsWith(`${publishedFolderPath}/`)) {
+              try {
+                await this.app.vault.createFolder(publishedFolderPath);
+              } catch (e) {
+                // Folder already exists, which is fine.
+              }
+
+              const newFilePath = `${publishedFolderPath}/${activeFile.name}`;
+              // Check if a file with the same name already exists in destination
+              // If so, we might fail or overwrite? Rename throws if exists.
+              // Since we might be updating a file that WAS elsewhere, but we don't want to overwrite another file.
+              // For now, assume it's fine or user manages it.
+
+              await this.app.vault.rename(activeFile, newFilePath);
+              new Notice(`File moved to "${publishedFolderPath}"`, 5000);
+              console.log(`File moved to ${newFilePath}`);
+          } else {
+              console.log('File is already in Published folder. Skipping move.');
           }
-          
-          const newFilePath = `${publishedFolderPath}/${activeFile.name}`;
-          await this.app.vault.rename(activeFile, newFilePath);
-          new Notice(`File moved to "${publishedFolderPath}"`, 5000);
-          console.log(`File moved to ${newFilePath}`);
 
 
         } catch (error) {
