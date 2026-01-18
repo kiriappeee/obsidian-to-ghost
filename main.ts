@@ -101,8 +101,8 @@ export default class ObsidianToGhostPublisher extends Plugin {
 
   private async resolveInternalLinks(markdownContent: string, sourcePath: string): Promise<string> {
     // Regex to find WikiLinks that are NOT image links (negative lookbehind for '!')
-    // Captures: 1=linkTarget (e.g., "My Note#Heading"), 2=displayText (if '|' present)
-    const linkRegex = /(?<!\!)\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g;
+    // Uses lazy matching (.*?) to allow for nested brackets in anchors
+    const linkRegex = /(?<!\!)\[\[(.*?)\]\]/g;
     let processedMarkdown = markdownContent;
     const matches = Array.from(markdownContent.matchAll(linkRegex));
 
@@ -111,11 +111,28 @@ export default class ObsidianToGhostPublisher extends Plugin {
     }
 
     for (const match of matches) {
-      const fullLinkMatch = match[0]; // e.g., "[[My Note#Heading|Display Text]]"
-      const linkTargetWithAnchor = match[1]; // e.g., "My Note#Heading"
-      const customDisplayText = match[2]; // e.g., "Display Text"
+      const fullLinkMatch = match[0];
+      const content = match[1];
 
-      const [linkPath, anchor] = linkTargetWithAnchor.split('#'); // linkPath: "My Note", anchor: "Heading"
+      // Parse content for target and display text, handling potential pipes in complex links
+      let linkTargetWithAnchor = content;
+      let customDisplayText = undefined;
+
+      const pipeIndex = content.indexOf('|');
+      if (pipeIndex !== -1) {
+        linkTargetWithAnchor = content.substring(0, pipeIndex);
+        customDisplayText = content.substring(pipeIndex + 1);
+      }
+
+      // Parse target for path and anchor
+      let linkPath = linkTargetWithAnchor;
+      let anchor = undefined;
+      const hashIndex = linkTargetWithAnchor.indexOf('#');
+      if (hashIndex !== -1) {
+        linkPath = linkTargetWithAnchor.substring(0, hashIndex);
+        anchor = linkTargetWithAnchor.substring(hashIndex + 1);
+      }
+
       const linkTargetFile = this.app.metadataCache.getFirstLinkpathDest(linkPath, sourcePath);
 
       if (!linkTargetFile) {
@@ -138,7 +155,9 @@ export default class ObsidianToGhostPublisher extends Plugin {
 
       let finalUrl = publishedUrl;
       if (anchor) {
-        finalUrl += `#${slugify(anchor)}`;
+        // Strip markdown links from anchor before slugifying
+        const cleanAnchor = anchor.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+        finalUrl += `#${slugify(cleanAnchor)}`;
       }
 
       const linkText = customDisplayText || linkPath; // Use custom text or just the linkPath (file name)

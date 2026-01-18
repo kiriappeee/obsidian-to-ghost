@@ -6885,7 +6885,7 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
     return match ? match[1].replace(/^['"]|['"]$/g, "").trim() : null;
   }
   async resolveInternalLinks(markdownContent, sourcePath) {
-    const linkRegex = /(?<!\!)\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g;
+    const linkRegex = /(?<!\!)\[\[(.*?)\]\]/g;
     let processedMarkdown = markdownContent;
     const matches = Array.from(markdownContent.matchAll(linkRegex));
     if (matches.length > 0) {
@@ -6893,9 +6893,21 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
     }
     for (const match of matches) {
       const fullLinkMatch = match[0];
-      const linkTargetWithAnchor = match[1];
-      const customDisplayText = match[2];
-      const [linkPath, anchor] = linkTargetWithAnchor.split("#");
+      const content = match[1];
+      let linkTargetWithAnchor = content;
+      let customDisplayText = void 0;
+      const pipeIndex = content.indexOf("|");
+      if (pipeIndex !== -1) {
+        linkTargetWithAnchor = content.substring(0, pipeIndex);
+        customDisplayText = content.substring(pipeIndex + 1);
+      }
+      let linkPath = linkTargetWithAnchor;
+      let anchor = void 0;
+      const hashIndex = linkTargetWithAnchor.indexOf("#");
+      if (hashIndex !== -1) {
+        linkPath = linkTargetWithAnchor.substring(0, hashIndex);
+        anchor = linkTargetWithAnchor.substring(hashIndex + 1);
+      }
       const linkTargetFile = this.app.metadataCache.getFirstLinkpathDest(linkPath, sourcePath);
       if (!linkTargetFile) {
         throw new Error(`Could not resolve internal link: [[${linkTargetWithAnchor}]]`);
@@ -6912,7 +6924,8 @@ var ObsidianToGhostPublisher = class extends import_obsidian.Plugin {
       }
       let finalUrl = publishedUrl;
       if (anchor) {
-        finalUrl += `#${slugify(anchor)}`;
+        const cleanAnchor = anchor.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+        finalUrl += `#${slugify(cleanAnchor)}`;
       }
       const linkText = customDisplayText || linkPath;
       processedMarkdown = processedMarkdown.replace(fullLinkMatch, `[${linkText}](${finalUrl})`);
